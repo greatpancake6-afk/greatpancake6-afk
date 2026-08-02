@@ -1179,6 +1179,7 @@ function requestLocation(){
     if(watchId !== null) navigator.geolocation.clearWatch(watchId); // never stack multiple watches
     watchId = navigator.geolocation.watchPosition(
       pos=>{
+        const hadRealFixBefore = state.mapLocation.status === 'granted';
         state.mapLocation = {status:'granted', lat:pos.coords.latitude, lon:pos.coords.longitude};
         // Cheap UI updates happen every time...
         const chip = document.getElementById('mapLocChip');
@@ -1187,7 +1188,13 @@ function requestLocation(){
         if(btnWrap && btnWrap.querySelector('[data-action="enable-location"]')){
           btnWrap.querySelector('[data-action="enable-location"]').remove();
         }
-        // ...but recentering the map / touching markers is throttled to save battery.
+        // The very first real GPS lock bypasses the throttle below entirely: any ambient seeds
+        // spawned earlier (before we had a real position, using the DEMO_CENTER fallback) get
+        // reconciled onto the player's real coordinates immediately, instead of waiting up to
+        // GEO_UPDATE_MIN_INTERVAL_MS or the next 20s world-tick to notice.
+        if(!hadRealFixBefore && mapStateLoaded) mapWorldTick();
+        // ...but recentering the map / touching markers on every subsequent fix is throttled to
+        // save battery.
         const now = Date.now();
         if(now - lastGeoUpdateTs < GEO_UPDATE_MIN_INTERVAL_MS) return;
         lastGeoUpdateTs = now;
@@ -1315,10 +1322,12 @@ function addSpawnToState(key, lat, lon, kind){
   saveMapStateDebounced();
   return spawn;
 }
-// Ambient seeds pull ONLY from the "Both" (shop+map) category pool, weighted so commons are common.
-function spawnAmbientSeed(){
+// Ambient seeds pull ONLY from the "Both" (shop+map) category pool, weighted so commons are common
+// — unless forcedTierKey is given (used for the guaranteed initial/bootstrap batch, which must be
+// specifically common+both seeds per spec).
+function spawnAmbientSeed(forcedTierKey){
   const player = getPlayerCoords();
-  const tierKey = pickTier(AMBIENT_TIER_WEIGHTS);
+  const tierKey = forcedTierKey || pickTier(AMBIENT_TIER_WEIGHTS);
   let key = pickSpeciesForCategoryTier('both', tierKey);
   if(!key) key = DEX_ORDER.find(k=> SEED_TYPES[k].category==='both'); // defensive fallback, should never trigger
   if(!key) return;
@@ -1345,11 +1354,31 @@ function pickSpeciesForCategoryTier(category, tierKey){
   if(!candidates.length) return null;
   return candidates[Math.floor(Math.random()*candidates.length)];
 }
-// Keeps 2-3 ambient seeds alive at all times. Losing one (collected or expired) queues a
-// 10-30 min respawn cooldown UNLESS the map is completely empty, in which case it refills
-// immediately so the player is never staring at nothing.
+// BUG FIX: seeds "showing up from way too far away" — ambient seeds are only ever allowed to exist
+// within AMBIENT_RADIUS_M (500m, strict) of the player's real position. This is what catches and
+// corrects any seed that was originally spawned before a real GPS lock was available (using the
+// DEMO_CENTER fallback) or that the player has since walked far away from: it's purged here and
+// immediately replaced near wherever the player actually is now. Only runs once we trust the
+// coordinates (a real 'granted' GPS fix), so it never fights the DEMO_CENTER fallback itself.
+function relocateStaleAmbientSpawns(){
+  if(state.mapLocation.status !== 'granted') return;
+  const player = getPlayerCoords();
+  const stale = state.mapSpawns.filter(s=> s.kind==='ambient'
+    && haversineMeters(player.lat, player.lon, s.lat, s.lon) > AMBIENT_RADIUS_M);
+  if(!stale.length) return;
+  stale.forEach(s=>{ removeSpawnMarker(s.uid); });
+  const staleUids = new Set(stale.map(s=>s.uid));
+  state.mapSpawns = state.mapSpawns.filter(s=> !staleUids.has(s.uid));
+}
+// Keeps 2-3 ambient (common, "both"-pool) seeds alive within a strict 500m radius at all times.
+// - A totally empty board (first load, or everything lost at once) refills its FULL target
+//   instantly, guaranteed common+both species, so the player always sees exactly 2-3 seeds right
+//   away — never just one instant spawn with the rest silently stuck behind a cooldown.
+// - Losing a single seed out of an otherwise-populated board (collected, or expired on its own)
+//   still queues a normal 20-30 min respawn cooldown, unchanged from before.
 function ambientMaintenance(){
   if(!mapStateLoaded) return;
+  relocateStaleAmbientSpawns();
   const now = Date.now();
   const stillPending = [];
   state.mapRespawnQueue.forEach(item=>{
@@ -1357,11 +1386,15 @@ function ambientMaintenance(){
     else stillPending.push(item);
   });
   state.mapRespawnQueue = stillPending;
-  let ambientActive = state.mapSpawns.filter(s=>s.kind==='ambient').length;
-  let deficit = state.ambientTargetCount - ambientActive - state.mapRespawnQueue.length;
+  const ambientActiveAtStart = state.mapSpawns.filter(s=>s.kind==='ambient').length;
+  const boardWasEmpty = ambientActiveAtStart === 0 && state.mapRespawnQueue.length === 0;
+  let deficit = state.ambientTargetCount - ambientActiveAtStart - state.mapRespawnQueue.length;
   while(deficit > 0){
-    if(ambientActive === 0){ spawnAmbientSeed(); ambientActive++; }
-    else { state.mapRespawnQueue.push({ readyAt: now + randBetween(RESPAWN_COOLDOWN_MIN_MS, RESPAWN_COOLDOWN_MAX_MS) }); }
+    if(boardWasEmpty){
+      spawnAmbientSeed('common'); // guaranteed initial batch: common tier, "both" category
+    } else {
+      state.mapRespawnQueue.push({ readyAt: now + randBetween(RESPAWN_COOLDOWN_MIN_MS, RESPAWN_COOLDOWN_MAX_MS) });
+    }
     deficit--;
   }
   saveMapStateDebounced();
@@ -1493,42 +1526,57 @@ function showLeafToast(type){
 }
 
 /* ---- Off-screen radar: arrows pinned to the map edge pointing at seeds outside the 200m view ---- */
+// Great-circle initial bearing (forward azimuth) from point 1 to point 2, in degrees clockwise
+// from true north (0-360). This is the full, standard spherical bearing formula — every term is
+// present and closed out; nothing here is abbreviated or left incomplete.
 function computeBearing(lat1, lon1, lat2, lon2){
-  const toRad = d=> d*Math.PI/180;
-  const phi1 = toRad(lat1), phi2 = toRad(lat2), dLon = toRad(lon2-lon1);
-  const y = Math.sin(dLon)*Math.cos(phi2);
-  const x = Math.cos(phi1)*Math.sin(phi2) - Math.sin(phi1)*Math.cos(phi2)*Math.cos(dLon);
-  return (Math.atan2(y,x)*180/Math.PI + 360) % 360;
+  if(![lat1, lon1, lat2, lon2].every(Number.isFinite)) return 0; // guard against bad/missing GPS data
+  const toRad = deg => deg * Math.PI / 180;
+  const phi1 = toRad(lat1);
+  const phi2 = toRad(lat2);
+  const deltaLon = toRad(lon2 - lon1);
+  const y = Math.sin(deltaLon) * Math.cos(phi2);
+  const x = (Math.cos(phi1) * Math.sin(phi2)) - (Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLon));
+  const thetaRad = Math.atan2(y, x);
+  const thetaDeg = thetaRad * 180 / Math.PI;
+  return (thetaDeg + 360) % 360;
 }
+// Finds where a ray from the center of a w×h box, travelling at compass bearing `bearingDeg`
+// (0 = up/north, 90 = right/east, 180 = down/south, 270 = left/west — matching screen space
+// exactly since the map is never rotated), intersects the box's edge (inset by `margin` px).
+// Complete rectangle-ray intersection: handles every bearing, including the axis-aligned cases
+// where dx or dy is exactly 0.
 function edgePointForBearing(bearingDeg, w, h, margin){
-  const rad = bearingDeg*Math.PI/180;
-  const dx = Math.sin(rad), dy = -Math.cos(rad); // screen space: bearing 0 (N) points up
-  const halfW = Math.max(w/2-margin, 1), halfH = Math.max(h/2-margin, 1);
-  const tX = dx!==0 ? halfW/Math.abs(dx) : Infinity;
-  const tY = dy!==0 ? halfH/Math.abs(dy) : Infinity;
-  const t = Math.min(tX,tY);
-  return { x: w/2 + dx*t, y: h/2 + dy*t };
+  const rad = bearingDeg * Math.PI / 180;
+  const dx = Math.sin(rad);
+  const dy = -Math.cos(rad);
+  const halfW = Math.max(w / 2 - margin, 1);
+  const halfH = Math.max(h / 2 - margin, 1);
+  const tX = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
+  const tY = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
+  const t = Math.min(tX, tY);
+  return { x: (w / 2) + (dx * t), y: (h / 2) + (dy * t) };
 }
 // Location context for off-screen seeds: prefer a real nearby POI label (already fetched, free,
 // instant); fall back to a throttled OpenStreetMap Nominatim reverse-geocode for a street/area
 // name. Results are cached on the spawn itself (and persisted) so each spawn is only resolved once.
 let nominatimQueue = Promise.resolve();
 function nearestPOILabel(pt, maxM){
-  let best=null, bestD=Infinity;
+  let best = null, bestD = Infinity;
   state.mapPOIs.forEach(p=>{
     const d = haversineMeters(pt.lat, pt.lon, p.lat, p.lon);
-    if(d<maxM && d<bestD){ best=p; bestD=d; }
+    if(d < maxM && d < bestD){ best = p; bestD = d; }
   });
   return best ? best.label : null;
 }
 async function reverseGeocode(lat, lon){
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=17&addressdetails=1`;
   const ctrl = new AbortController();
-  const timer = setTimeout(()=>ctrl.abort(), 6000);
+  const timer = setTimeout(()=> ctrl.abort(), 6000);
   try{
     const res = await fetch(url, { signal: ctrl.signal, headers: {'Accept-Language':'en'} });
     clearTimeout(timer);
-    if(!res.ok) throw new Error('Nominatim HTTP '+res.status);
+    if(!res.ok) throw new Error('Nominatim HTTP ' + res.status);
     const data = await res.json();
     const a = data.address || {};
     return a.road || a.pedestrian || a.footway || a.neighbourhood || a.suburb || a.hamlet || a.village || null;
@@ -1554,6 +1602,11 @@ function resolveSpawnLandmark(spawn){
     await new Promise(r=> setTimeout(r, 1100));
   });
 }
+// Renders one edge-pinned directional arrow per off-screen seed, each pointing (via computeBearing,
+// recomputed fresh from the player's current live coordinates every single call) toward its target,
+// with distance and a real-world landmark/street name beneath it. Because this rebuilds its HTML
+// from scratch on every call using getPlayerCoords() at call-time — never a cached/stale position —
+// every arrow's rotation AND on-screen position both update together as the player physically walks.
 function updateRadarArrows(){
   if(!leafletMapInstance) return;
   const layer = document.getElementById('radarLayer');
@@ -1562,6 +1615,7 @@ function updateRadarArrows(){
   const w = scene.clientWidth, h = scene.clientHeight;
   if(!w || !h){ layer.innerHTML = ''; return; }
   const player = getPlayerCoords();
+  if(!Number.isFinite(player.lat) || !Number.isFinite(player.lon)){ layer.innerHTML = ''; return; }
   const offScreen = state.mapSpawns.filter(s=> haversineMeters(player.lat, player.lon, s.lat, s.lon) > VIEWPORT_RADIUS_M);
   layer.innerHTML = offScreen.map(spawn=>{
     const dist = Math.round(haversineMeters(player.lat, player.lon, spawn.lat, spawn.lon));
