@@ -1,0 +1,2245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>Flora — A Cozy Garden</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root{
+    --cream:#FBF1E0; --paper:#FFFBF4;
+    --moss:#4F6F4B; --moss-dark:#3A5236; --moss-light:#8CAE7D;
+    --terracotta:#C97B54; --terracotta-dark:#A85D3B; --terracotta-rim:#DE9B72;
+    --gold:#E3AC3D; --gold-light:#F5D68C;
+    --blush:#DE8D95; --blush-light:#F1BEC2;
+    --lavender:#9C82C4; --teal:#4FA0A8; --sun:#F5C24B;
+    --ink:#4A3728; --ink-soft:#8A7660;
+    --line:#e6d8bf; --wood:#B8834F; --wood-dark:#8f5f33;
+    --shadow: 0 6px 16px rgba(74,55,40,0.12);
+    --vh: 1vh;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0; height:100%;}
+  body{
+    font-family:'Nunito',sans-serif;
+    color:var(--ink);
+    overflow:hidden;
+  }
+  h1,h2,h3,.display{font-family:'Baloo 2',sans-serif;}
+
+  /* ---------- App container (no phone bezel/mockup) ---------- */
+  .phone{
+    position:relative;
+    display:flex; flex-direction:column;
+    background:var(--cream);
+    overflow:hidden;
+  }
+  .phone::before{
+    content:""; position:absolute; inset:0;
+    background-image: radial-gradient(rgba(74,55,40,0.035) 1px, transparent 1px);
+    background-size: 5px 5px; pointer-events:none; z-index:5;
+  }
+  body.mobile-device{ background:var(--cream); }
+  body.mobile-device .phone{ width:100vw; height: calc(var(--vh, 1vh) * 100); }
+  body.desktop-device{
+    display:flex; align-items:center; justify-content:center;
+    background: radial-gradient(circle at 20% 10%, #efe2c8 0%, #e4d3ae 55%, #d9c497 100%);
+  }
+  body.desktop-device .phone{ width:100%; max-width:480px; height:100vh; }
+
+  .topbar{ display:flex; align-items:center; padding:14px 14px 8px; z-index:2; }
+  .topbar-left{ flex:1; display:flex; justify-content:flex-start; align-items:center; gap:6px; }
+  .topbar-center{ flex:1.6; display:flex; justify-content:center; }
+  .topbar-right{ flex:1; display:flex; justify-content:flex-end; gap:6px; align-items:center; }
+  .brand{ display:flex; align-items:center; gap:6px; font-size:20px; font-weight:700; color:var(--moss-dark); letter-spacing:0.2px; }
+  .brand .leafmark{width:21px;height:21px;}
+  .stat-pill{
+    display:flex; align-items:center; gap:6px; background:var(--paper); border:2px solid var(--line);
+    border-radius:999px; padding:6px 10px 6px 8px; font-weight:800; font-size:13px;
+    box-shadow: 0 2px 0 rgba(74,55,40,0.08);
+  }
+  .avatar-btn{
+    width:32px; height:32px; border-radius:50%;
+    background: linear-gradient(160deg, var(--moss-light), var(--moss));
+    border:2px solid #fff; box-shadow: var(--shadow);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .level-chip{ background:var(--moss); color:#fff; font-weight:800; font-size:10.5px; padding:4px 9px; border-radius:999px; box-shadow:0 2px 0 var(--moss-dark); }
+
+  .content{ flex:1; overflow-y:auto; padding: 4px 16px 110px; position:relative; z-index:1; -webkit-overflow-scrolling:touch; }
+  .content::-webkit-scrollbar{width:0;}
+
+  .screen-title{ font-size:24px; font-weight:800; color:var(--ink); margin: 4px 0 2px; }
+  .screen-sub{ font-size:12.5px; color:var(--ink-soft); margin-bottom:12px; font-weight:600; }
+
+  /* ---------- Windowsill ---------- */
+  .windowsill{
+    position:relative; border-radius:18px 18px 0 0; overflow:hidden;
+    box-shadow: var(--shadow); border: 10px solid var(--wood); border-bottom:none;
+    transition: background 0.8s ease;
+  }
+  .windowsill.weather-sunny{ background: linear-gradient(to bottom, #CFE3DE 0%, #CFE3DE 58%, #F5E9D3 100%); }
+  .windowsill.weather-cloudy{ background: linear-gradient(to bottom, #C6CCC3 0%, #C6CCC3 58%, #E4DCC6 100%); }
+  .windowsill.weather-rainy{ background: linear-gradient(to bottom, #93A9B3 0%, #93A9B3 58%, #CFC9B2 100%); }
+  .windowsill.weather-snowy{ background: linear-gradient(to bottom, #E1EDF0 0%, #E1EDF0 58%, #F1EEE2 100%); }
+  .window-mullion-v{ position:absolute; top:0; bottom:44px; left:50%; width:8px; margin-left:-4px; background:var(--wood); z-index:2; opacity:0.85; }
+  .window-mullion-h{ position:absolute; left:0; right:0; top:38%; height:8px; background:var(--wood); z-index:2; opacity:0.85; }
+  .weather-chip{
+    position:absolute; top:10px; left:10px; z-index:3;
+    background:rgba(255,255,255,0.8); border-radius:999px; padding:4px 10px;
+    font-size:11px; font-weight:800; color:var(--ink); display:flex; align-items:center; gap:4px;
+  }
+  .sky-deco{ position:absolute; inset:0; z-index:0; }
+  .weather-layer{ position:absolute; inset:0; z-index:1; pointer-events:none; }
+  .pots-row{ position:relative; display:flex; justify-content:space-between; align-items:flex-end; padding: 66px 10px 0; z-index:2; }
+  .shelf{
+    position:relative; height:36px;
+    background: linear-gradient(180deg, var(--wood) 0%, var(--wood) 55%, var(--wood-dark) 55%, var(--wood-dark) 100%);
+    border-top:3px solid #7a5230; border-left:10px solid var(--wood); border-right:10px solid var(--wood); border-bottom:12px solid var(--wood-dark);
+    border-radius:0 0 14px 14px;
+    box-shadow: 0 -4px 8px rgba(255,255,255,0.15) inset, 0 8px 12px rgba(0,0,0,0.28);
+    z-index:2; overflow:hidden;
+  }
+  .shelf::before{
+    content:""; position:absolute; inset:0;
+    background-image: repeating-linear-gradient(90deg, rgba(74,45,20,0.16) 0px, rgba(74,45,20,0.16) 1px, transparent 1px, transparent 9px);
+  }
+  .shelf::after{
+    content:""; position:absolute; left:0; right:0; top:0; height:4px;
+    background: rgba(0,0,0,0.22); filter: blur(2px);
+  }
+  .pot-slot{ display:flex; flex-direction:column; align-items:center; width:31%; cursor:pointer; user-select:none; }
+  .pot-visual{ position:relative; height:114px; width:100%; display:flex; align-items:flex-end; justify-content:center; }
+  .pot-visual svg{ overflow:visible; max-width:100%; height:auto; }
+  .pot-label{
+    margin-top:9px; font-size:10.5px; font-weight:800; color:var(--moss-dark);
+    background:rgba(255,255,255,0.75); padding:3px 8px; border-radius:999px; text-align:center; max-width:100%;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .ready-badge{
+    position:absolute; top:-18px; font-size:9.5px; font-weight:800; color:#fff; background:var(--gold);
+    padding:3px 8px; border-radius:999px; box-shadow:0 2px 4px rgba(0,0,0,0.2);
+    animation: bob 1.4s ease-in-out infinite; white-space:nowrap; z-index:4;
+  }
+  @keyframes bob{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(-4px);} }
+  @keyframes sparkle{ 0%,100%{opacity:0.4; transform:scale(0.9);} 50%{opacity:1; transform:scale(1.15);} }
+  @keyframes sway{ 0%,100%{ transform: rotate(-2.5deg); } 50%{ transform: rotate(2.5deg); } }
+  @keyframes floatCloud{ 0%{ transform: translateX(0); } 100%{ transform: translateX(-18px); } }
+  @keyframes pop{ 0%{ transform: scale(0.6); opacity:0; } 60%{ transform: scale(1.08); opacity:1;} 100%{ transform: scale(1); } }
+  @keyframes riseFade{ 0%{ transform: translateY(0); opacity:1;} 100%{ transform: translateY(-40px); opacity:0;} }
+  @keyframes pulseRing{ 0%,100%{ opacity:0.25; transform:scale(0.9);} 50%{ opacity:0.55; transform:scale(1.15);} }
+  @keyframes rainFall{ 0%{transform:translateY(-14px);} 100%{transform:translateY(300px);} }
+  @keyframes snowFall{ 0%{transform:translate(0,-14px);} 50%{transform:translate(8px,140px);} 100%{transform:translate(-6px,300px);} }
+  @keyframes ringExpand{ 0%{transform:scale(0.3); opacity:0.9;} 100%{transform:scale(3.4); opacity:0;} }
+  @keyframes navPulse{ 0%{transform:scale(1);} 40%{transform:scale(1.35);} 100%{transform:scale(1);} }
+  @keyframes coreFlash{ 0%{opacity:0; transform:scale(0.3);} 45%{opacity:1; transform:scale(1.3);} 100%{opacity:0; transform:scale(1.7);} }
+  @keyframes glintSweep{ 0%{transform:translateX(-140%) rotate(18deg);} 100%{transform:translateX(240%) rotate(18deg);} }
+  @keyframes arrowPulse{ 0%,100%{opacity:0.35; transform:translateX(0);} 50%{opacity:1; transform:translateX(8px);} }
+  @keyframes confettiFall{ 0%{transform:translateY(-16px) rotate(0deg); opacity:1;} 100%{transform:translateY(170px) rotate(320deg); opacity:0;} }
+  @keyframes badgePulse{ 0%,100%{transform:scale(1);} 50%{transform:scale(1.25);} }
+
+  .fab-wrap{ display:flex; justify-content:center; margin: 14px 0 16px; }
+  .fab{
+    display:flex; align-items:center; gap:10px;
+    background: linear-gradient(180deg, var(--moss-light), var(--moss)); color:#fff; border:none;
+    border-radius:999px; padding:14px 22px; font-family:'Baloo 2',sans-serif; font-size:16px; font-weight:700;
+    box-shadow: 0 6px 0 var(--moss-dark), 0 8px 14px rgba(58,82,54,0.35);
+    cursor:pointer; transition: transform 0.08s ease;
+  }
+  .fab:active{ transform: translateY(4px); box-shadow: 0 2px 0 var(--moss-dark); }
+
+  .card{ background:var(--paper); border-radius:20px; border:2px solid #fff; box-shadow: var(--shadow); padding:14px; margin-bottom:14px; }
+  .shop-card{ margin-top:10px; }
+  .section-heading{ display:flex; align-items:center; justify-content:space-between; margin: 6px 0 10px; }
+  .section-heading h3{ font-size:16px; margin:0; color:var(--ink);}
+  .pill-btn{ font-family:'Nunito',sans-serif; font-weight:800; font-size:12.5px; border:none; border-radius:999px; padding:8px 14px; cursor:pointer; }
+  .pill-btn.primary{ background:var(--moss); color:#fff; box-shadow:0 3px 0 var(--moss-dark);}
+  .pill-btn.gold{ background:var(--gold); color:#4a3416; box-shadow:0 3px 0 #b8842a;}
+  .pill-btn.soft{ background:#f1e6cf; color:var(--ink); box-shadow:0 3px 0 #d9c69f;}
+  .pill-btn:active{ transform:translateY(2px); box-shadow:none !important; }
+  .pill-btn:disabled{ opacity:0.45; cursor:not-allowed; }
+
+  .seed-card{ display:flex; align-items:center; gap:12px; background:var(--paper); border:2px solid var(--line); border-radius:18px; padding:10px 12px; margin-bottom:10px; }
+  .seed-card.free{ border-color:var(--gold); background:#FFF8E8; }
+  .seed-icon-wrap{ width:50px; height:50px; border-radius:14px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .seed-info{flex:1; min-width:0;}
+  .seed-name{font-weight:800; font-size:14px; color:var(--ink);}
+  .seed-tag{ display:inline-block; margin-top:2px; font-size:9.5px; font-weight:800; letter-spacing:0.3px; padding:2px 7px; border-radius:999px; color:#fff; }
+  .seed-meta{ font-size:11px; color:var(--ink-soft); font-weight:700; margin-top:3px;}
+  .seed-actions{ display:flex; flex-direction:column; gap:6px; }
+  .empty-state{ text-align:center; padding: 30px 10px; color:var(--ink-soft); }
+
+  .pouch-header{ display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:14px; }
+  .composter-corner{
+    width:38px;height:38px; border-radius:12px; background:var(--paper); border:2px solid var(--line);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0; transition: transform 0.2s ease;
+  }
+  .composter-corner.bump{ animation: navPulse 0.5s ease; }
+
+  .streak-card{
+    display:flex; align-items:center; gap:12px; margin-bottom:16px;
+    background: linear-gradient(135deg, var(--gold-light), var(--gold));
+    border-radius:18px; padding:12px 14px; border:2px solid #d8972c; cursor:pointer;
+    animation: bob 2s ease-in-out infinite;
+  }
+  .streak-card b{ display:block; font-size:14px; color:#4a3416; }
+  .streak-card span{ font-size:11px; color:#6b4d1c; font-weight:700; }
+
+  .bottom-nav{
+    position:absolute; left:0; right:0; bottom:0; display:flex; background:var(--paper);
+    border-top:2px solid var(--line); padding: 10px 4px calc(10px + env(safe-area-inset-bottom)); z-index:10;
+  }
+  .nav-btn{
+    position:relative; flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; background:none; border:none;
+    cursor:pointer; color:var(--ink-soft); padding:6px 0; font-family:'Nunito',sans-serif; font-weight:800; font-size:10px;
+  }
+  .nav-btn.active{ color:var(--moss-dark); }
+  .nav-btn.pulse{ animation: navPulse 0.6s ease; }
+  .nav-btn svg{ width:21px; height:21px; }
+  .nav-btn .dot{ width:5px;height:5px;border-radius:50%; background:var(--gold); margin-top:-1px; opacity:0; }
+  .nav-btn.active .dot{opacity:1;}
+  .nav-badge{
+    display:none; position:absolute; top:2px; right:22%; width:9px; height:9px; border-radius:50%;
+    background:#e05555; border:2px solid var(--paper); animation: badgePulse 1s ease-in-out infinite;
+  }
+
+  .modal-backdrop{
+    position:absolute; inset:0; background:rgba(58,42,25,0.45); display:flex; align-items:flex-end;
+    justify-content:center; z-index:30; animation: fadeIn 0.15s ease;
+  }
+  @keyframes fadeIn{ from{opacity:0;} to{opacity:1;} }
+  .modal-sheet{
+    width:100%; background:var(--cream); border-radius:26px 26px 0 0; padding: 20px 18px calc(24px + env(safe-area-inset-bottom));
+    max-height:82%; overflow-y:auto; overflow-x:hidden; box-shadow: 0 -10px 30px rgba(0,0,0,0.25); animation: slideUp 0.22s ease;
+  }
+  @keyframes slideUp{ from{ transform:translateY(30px); opacity:0;} to{transform:translateY(0); opacity:1;} }
+  .modal-handle{ width:40px; height:5px; background:var(--line); border-radius:99px; margin:0 auto 14px; }
+  .modal-title{ font-size:19px; font-weight:800; margin:0 0 4px;}
+  .modal-sub{ font-size:12.5px; color:var(--ink-soft); font-weight:700; margin-bottom:16px;}
+  .close-x{
+    position:absolute; top:14px; right:14px; background:var(--paper); border:2px solid var(--line);
+    width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    cursor:pointer; font-weight:800; color:var(--ink-soft);
+  }
+  .speech-tail{
+    position:absolute; top:-9px; left:50%; margin-left:-9px; width:18px; height:18px;
+    background:var(--cream); transform:rotate(45deg); border-radius:4px;
+  }
+
+  .toast-stack{ position:absolute; top:62px; left:0; right:0; display:flex; flex-direction:column; align-items:center; gap:6px; z-index:50; pointer-events:none; }
+  .toast{
+    background:var(--ink); color:#fff; font-weight:800; font-size:13px; padding:9px 16px; border-radius:999px;
+    box-shadow:0 6px 14px rgba(0,0,0,0.25); animation: toastIn 0.25s ease, riseFade 0.4s ease 1.6s forwards;
+  }
+  @keyframes toastIn{ from{ transform:translateY(-10px); opacity:0;} to{transform:translateY(0); opacity:1;} }
+
+  /* ---------- Real Leaflet map, locked camera, paper skin ---------- */
+  .map-scene{ position:relative; border-radius:20px; overflow:hidden; box-shadow:var(--shadow); border:2px solid #fff; margin-bottom:14px; height:340px; background:#EFE6D2; }
+  #leafletMap{ width:100%; height:100%; }
+  .leaflet-container{ font-family:'Nunito',sans-serif; background:#EFE6D2 !important; }
+  .leaflet-tile-pane{ filter: saturate(0.62) sepia(0.34) hue-rotate(-8deg) brightness(1.04) contrast(1.05); }
+  .leaflet-div-icon{ background:transparent !important; border:none !important; }
+  .leaflet-control-attribution{ font-size:9px !important; background:rgba(255,251,244,0.75) !important; color:var(--ink-soft) !important; border-radius:6px 0 0 0 !important; }
+  .leaflet-popup-content-wrapper{ background:var(--paper) !important; border-radius:14px !important; box-shadow:var(--shadow) !important; }
+  .leaflet-popup-tip{ background:var(--paper) !important; }
+  .map-scene::before{
+    /* warm cream tint, softens the tile colors into a pastel illustrated-parchment feel */
+    content:""; position:absolute; inset:0; z-index:640; pointer-events:none;
+    background: radial-gradient(circle at 50% 40%, rgba(255,246,224,0.05), rgba(184,131,79,0.16) 100%);
+    mix-blend-mode:soft-light;
+  }
+  .map-scene::after{
+    content:""; position:absolute; inset:0; z-index:650; pointer-events:none;
+    background-image: radial-gradient(rgba(74,55,40,0.06) 1.2px, transparent 1.2px);
+    background-size:5px 5px; mix-blend-mode:multiply;
+  }
+  /* Cartoony directional player arrow (replaces the old static dot) */
+  .map-player-wrap{ position:relative; width:30px; height:30px; }
+  .map-player-pulse{
+    position:absolute; left:50%; top:50%; width:26px;height:26px; margin:-13px 0 0 -13px; border-radius:50%;
+    background:var(--moss-light); opacity:0.4; animation: pulseRing 1.8s ease-in-out infinite;
+  }
+  .map-player-arrow{
+    position:absolute; left:50%; top:50%; width:26px; height:26px; margin:-13px 0 0 -13px;
+    transform-origin:50% 50%; transform:rotate(0deg); transition:transform 0.25s ease-out;
+    filter: drop-shadow(0 2px 3px rgba(58,82,54,0.45));
+  }
+  .map-spawn-icon{ position:relative; width:34px; height:34px; }
+  .map-spawn-mark{
+    position:absolute; left:50%; top:50%; width:30px;height:30px; margin:-15px 0 0 -15px; border-radius:50%;
+    color:#fff; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:14px;
+    border:2.5px solid #fff; box-shadow:0 3px 8px rgba(0,0,0,0.3); animation: bob 1s ease-in-out infinite; cursor:pointer;
+  }
+  .map-spawn-mark.spawn-common{ background:linear-gradient(160deg, var(--moss-light), var(--moss)); }
+  .map-spawn-mark.spawn-uncommon{ background:linear-gradient(160deg, var(--blush-light), var(--blush)); }
+  .map-spawn-mark.spawn-rare{ background:linear-gradient(160deg, #B49BDE, var(--lavender)); }
+  .map-spawn-mark.spawn-epic{ background:linear-gradient(160deg, #7FD4E0, var(--teal)); }
+  .map-spawn-mark.spawn-legendary{ background:linear-gradient(160deg, var(--gold-light), var(--gold)); }
+  .map-spawn-pulse{ position:absolute; left:50%; top:50%; width:30px; height:30px; margin:-15px 0 0 -15px; border-radius:50%; background:var(--gold); opacity:0.3; animation: pulseRing 1.4s ease-in-out infinite; }
+  .map-spawn-mark.spawn-special{ box-shadow:0 0 0 3px rgba(245,194,75,0.55), 0 3px 8px rgba(0,0,0,0.3); }
+  .map-poi-icon{
+    width:30px; height:30px; border-radius:50% 50% 50% 4px; transform:rotate(45deg);
+    display:flex; align-items:center; justify-content:center; font-size:14px;
+    box-shadow:0 3px 7px rgba(74,55,40,0.3); border:2.5px solid #fff; cursor:pointer;
+  }
+  .map-poi-icon span{ display:block; transform:rotate(-45deg); }
+  .map-poi-icon.poi-cafe{ background:linear-gradient(160deg, var(--terracotta-rim), var(--terracotta)); }
+  .map-poi-icon.poi-park{ background:linear-gradient(160deg, var(--moss-light), var(--moss)); }
+  .map-poi-icon.poi-building{ background:linear-gradient(160deg, #B39BDA, var(--lavender)); }
+  .map-poi-icon.poi-restaurant{ background:linear-gradient(160deg, var(--blush-light), var(--blush)); }
+
+  /* ---- Off-screen radar arrows: point toward seeds outside the 200m viewport ---- */
+  .radar-layer{ position:absolute; inset:0; z-index:670; pointer-events:none; }
+  .radar-arrow{ position:absolute; pointer-events:auto; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .radar-arrow-shape{
+    width:24px; height:24px; border-radius:50% 50% 50% 4px; display:flex; align-items:center; justify-content:center;
+    color:#fff; font-size:11px; font-weight:800; box-shadow:0 2px 6px rgba(74,55,40,0.35); border:2px solid #fff;
+  }
+  .radar-arrow-shape.spawn-common{ background:linear-gradient(160deg, var(--moss-light), var(--moss)); }
+  .radar-arrow-shape.spawn-uncommon{ background:linear-gradient(160deg, var(--blush-light), var(--blush)); }
+  .radar-arrow-shape.spawn-rare{ background:linear-gradient(160deg, #B49BDE, var(--lavender)); }
+  .radar-arrow-shape.spawn-epic{ background:linear-gradient(160deg, #7FD4E0, var(--teal)); }
+  .radar-arrow-shape.spawn-legendary{ background:linear-gradient(160deg, var(--gold-light), var(--gold)); }
+  .radar-arrow-tip{ position:absolute; top:-6px; left:50%; width:0; height:0; margin-left:-5px; border-left:5px solid transparent; border-right:5px solid transparent; border-bottom:7px solid var(--ink); opacity:0.85; }
+  .radar-arrow-label{
+    background:var(--paper); color:var(--ink); font-size:9px; font-weight:800; padding:1px 5px; border-radius:8px;
+    box-shadow:0 1px 4px rgba(74,55,40,0.25); white-space:nowrap;
+  }
+
+  .dex-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .dex-card{ background:var(--paper); border:2px solid var(--line); border-radius:16px; padding:10px; text-align:center; position:relative; }
+  .dex-card.locked{ background:#efe6d2; }
+  .dex-card .dex-icon{ width:52px; height:52px; margin:0 auto 6px; display:flex; align-items:center; justify-content:center; }
+  .dex-card .dex-name{ font-weight:800; font-size:11.5px; color:var(--ink); }
+  .dex-card .dex-count{ font-size:10px; color:var(--ink-soft); font-weight:700; margin-top:2px; }
+  .dex-card .dex-fact{ font-size:9.5px; color:var(--ink-soft); font-style:italic; margin-top:5px; line-height:1.3; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  .dex-progress-card{
+    background: linear-gradient(135deg, var(--moss-light), var(--moss)); color:#fff; border-radius:18px;
+    padding:14px 16px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between;
+  }
+
+  .rarity-common{background:var(--moss);}
+  .rarity-uncommon{background:var(--blush);}
+  .rarity-rare{background:var(--lavender);}
+  .rarity-epic{background:var(--teal);}
+  .rarity-legendary{background: linear-gradient(90deg, var(--sun), #E38D3D);}
+  .rarity-wild{background: linear-gradient(90deg, #6EA85A, #3E7A3A);}
+  .bg-common{background:#E4EEDD;} .bg-uncommon{background:#FBE6E7;} .bg-rare{background:#EFE5F7;}
+  .bg-epic{background:#E1F2F2;} .bg-legendary{background:#FFF3DA;} .bg-wild{background:#E9F2E0;}
+
+  .progress-track{ width:100%; height:9px; background:#e9dcbe; border-radius:99px; overflow:hidden; }
+  .progress-fill{ height:100%; background: linear-gradient(90deg, var(--moss-light), var(--moss)); border-radius:99px; transition: width 0.3s ease;}
+
+  .profile-avatar{
+    width:74px; height:74px; border-radius:50%; margin:0 auto 10px;
+    background: linear-gradient(160deg, var(--moss-light), var(--moss));
+    display:flex; align-items:center; justify-content:center; border:4px solid #fff; box-shadow:var(--shadow);
+  }
+  .stat-list{ display:flex; flex-direction:column; gap:9px; margin-top:6px; }
+  .stat-row-item{
+    display:flex; align-items:center; justify-content:space-between; background:var(--paper);
+    border:2px solid var(--line); border-radius:14px; padding:12px 14px;
+  }
+  .stat-row-item .label{ display:flex; align-items:center; gap:10px; font-weight:800; font-size:13px; color:var(--ink); }
+  .stat-row-item .value{ font-weight:800; font-size:14.5px; color:var(--moss-dark); }
+
+  .pack-card{ background:var(--paper); border:2px solid var(--line); border-radius:18px; padding:12px; margin-bottom:12px; }
+  .pack-card-top{ display:flex; align-items:center; gap:12px; margin-bottom:8px;}
+  .pack-card .seed-name{ font-size:15px; }
+  .pack-card .seed-meta{ font-size:10.5px; line-height:1.5; }
+
+  .pack-label-banner{ display:inline-block; padding:4px 12px; border-radius:999px; color:#fff; font-weight:800; font-size:11px; letter-spacing:0.5px; margin-bottom:10px; }
+  .tear-stage{ position:relative; height:170px; display:flex; align-items:center; justify-content:center; touch-action:none; overflow:hidden; border-radius:16px; }
+  .packet-half{ position:absolute; transition: transform 0.05s linear; }
+  .glow-ring{ position:absolute; width:44px; height:44px; border-radius:50%; border:3px solid; animation: ringExpand 0.9s ease-out forwards; }
+  .core-flash{ position:absolute; width:60px; height:60px; border-radius:50%; animation: coreFlash 0.8s ease forwards; }
+  .glint-sweep{ position:absolute; top:0; left:0; width:36%; height:100%; background:linear-gradient(120deg, transparent, rgba(255,255,255,0.7), transparent); animation: glintSweep 2.4s ease-in-out infinite; pointer-events:none; }
+  .swipe-hint{ position:absolute; bottom:8px; left:50%; transform:translateX(-50%); transition:opacity 0.2s ease; }
+
+  .confetti-layer{ position:absolute; inset:0; overflow:hidden; pointer-events:none; border-radius:26px 26px 0 0; }
+</style>
+</head>
+<body>
+
+<div class="phone" id="phone">
+
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="avatar-btn" data-action="open-profile" title="Profile">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" fill="#fff"/><path d="M4 20C4 15 8 13 12 13C16 13 20 15 20 20" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+      </div>
+      <div class="level-chip" id="levelChip">Lv 1</div>
+    </div>
+    <div class="topbar-center">
+      <div class="brand">
+        <svg class="leafmark" viewBox="0 0 24 24" fill="none"><path d="M4 20C4 20 3 10 12 5C21 10 20 20 20 20C14 17 9 17 4 20Z" fill="#8CAE7D" stroke="#3A5236" stroke-width="1.4" stroke-linejoin="round"/><path d="M12 5V17" stroke="#3A5236" stroke-width="1.2" stroke-linecap="round"/></svg>
+        Flora
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="stat-pill"><svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E3AC3D" stroke="#A8791F" stroke-width="1.5"/><text x="12" y="16" font-size="11" text-anchor="middle" fill="#7a5416" font-weight="800">¢</text></svg><span id="coinCount">0</span></div>
+      <div class="avatar-btn" data-action="open-settings" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" fill="#fff"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toastStack"></div>
+  <div class="content" id="content"></div>
+
+  <div class="bottom-nav">
+    <button class="nav-btn" data-tab="garden">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M4 20C4 20 3 10 12 5C21 10 20 20 20 20C14 17 9 17 4 20Z" fill="currentColor" opacity="0.15" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 5V17" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      Garden<div class="dot"></div>
+    </button>
+    <button class="nav-btn" data-tab="map">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M9 4L4 6V20L9 18M9 4L15 6M9 4V18M15 6L20 4V18L15 20M15 6V20M9 18L15 20" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>
+      Map<div class="dot"></div>
+    </button>
+    <button class="nav-btn" data-tab="pouch">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M6 9L7.5 4H16.5L18 9" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M4.5 9H19.5L18.5 20H5.5L4.5 9Z" fill="currentColor" opacity="0.15" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      Pouch<div class="dot"></div>
+    </button>
+    <button class="nav-btn" data-tab="dex">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M4 5C4 4 5 3.5 6 3.5H19V18.5H6C5 18.5 4 19 4 20V5Z" fill="currentColor" opacity="0.15" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M6 18.5C5 18.5 4 19 4 20C4 21 5 20.5 6 20.5H19V18.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      Dex<span class="nav-badge" id="dexBadge"></span><div class="dot"></div>
+    </button>
+  </div>
+
+  <div id="modalRoot"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ===================== DEVICE DETECTION & VIEWPORT ===================== */
+function detectDevice(){
+  const ua = navigator.userAgent || '';
+  const isMobileUA = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(ua);
+  const isNarrow = window.innerWidth <= 820;
+  const isMobile = isMobileUA || isNarrow;
+  document.body.classList.remove('mobile-device','desktop-device');
+  document.body.classList.add(isMobile ? 'mobile-device' : 'desktop-device');
+}
+function setVhVar(){
+  const vh = window.innerHeight * 0.01;
+  document.documentElement.style.setProperty('--vh', `${vh}px`);
+}
+detectDevice();
+setVhVar();
+window.addEventListener('resize', ()=>{
+  detectDevice(); setVhVar();
+  if(typeof leafletMapInstance !== 'undefined' && leafletMapInstance) leafletMapInstance.invalidateSize();
+});
+window.addEventListener('orientationchange', ()=>{
+  setTimeout(()=>{ setVhVar(); if(typeof leafletMapInstance !== 'undefined' && leafletMapInstance){ leafletMapInstance.invalidateSize(); updateRadarArrows(); } }, 200);
+});
+
+/* ===================== DATA GENERATION ===================== */
+const TIER_DEFAULTS = {
+  common:    { thresholdBase:800,  thresholdStep:60,  harvestBase:10,  harvestStep:2,  compostBase:2,  compostStep:1, shape:'bloom', petals:4, bg:'bg-common',    tag:'rarity-common',    weight:0  },
+  uncommon:  { thresholdBase:1500, thresholdStep:120, harvestBase:22,  harvestStep:4,  compostBase:5,  compostStep:1, shape:'bloom', petals:6, bg:'bg-uncommon',  tag:'rarity-uncommon',  weight:45 },
+  rare:      { thresholdBase:2600, thresholdStep:200, harvestBase:55,  harvestStep:8,  compostBase:14, compostStep:2, shape:'bloom', petals:7, bg:'bg-rare',      tag:'rarity-rare',      weight:30 },
+  epic:      { thresholdBase:3800, thresholdStep:250, harvestBase:110, harvestStep:12, compostBase:28, compostStep:3, shape:'vine',  petals:0, bg:'bg-epic',      tag:'rarity-epic',      weight:18 },
+  legendary: { thresholdBase:5200, thresholdStep:350, harvestBase:230, harvestStep:20, compostBase:55, compostStep:5, shape:'radiant',petals:8, bg:'bg-legendary', tag:'rarity-legendary', weight:7  }
+};
+const SPECIES_NAMES = {
+  common:   ['Common Sprout','Clover Sprig','Dew Moss','Sunny Sprout','Meadow Sprig'],
+  uncommon: ['Uncommon Bloom','Pink Peony','Daisy Chain','Lilac Bell','Coral Bud'],
+  rare:     ['Rare Starflower','Violet Iris','Crimson Orchid','Azure Aster','Amber Tulip'],
+  epic:     ['Epic Moonvine','Frost Fern','Shadow Ivy','Coral Creeper','Jade Serpentine'],
+  legendary:['Legendary Sunblossom','Phoenix Bloom','Celestial Lotus','Aurora Blossom','Eternal Rose']
+};
+const TIER_HUES = {
+  common:   [['#8CAE7D','#4F6F4B'],['#A9C98B','#5C7A44'],['#7FBF9A','#3E7A5C'],['#C9D98B','#7A8A44'],['#94C9A0','#4E7A5C']],
+  uncommon: [['#DE8D95','#B85F68'],['#E7A0C2','#B85F8A'],['#F0A8A8','#C06868'],['#DDA0DE','#8A5FB8'],['#F0B092','#C07850']],
+  rare:     [['#9C82C4','#6E4FA0'],['#8A7CE0','#5A46B0'],['#C4569C','#8A3468'],['#6E9CE0','#3E5FA0'],['#E0B85A','#A0783A']],
+  epic:     [['#4FA0A8','#2C6E74'],['#7FD4E0','#3E9AA8'],['#5A6EA8','#334478'],['#3ECFA0','#1E8060'],['#5AB0A0','#2E7060']],
+  legendary:[['#F5C24B','#C98A1C'],['#F58A4B','#C9521C'],['#B08AF5','#6E3EC9'],['#F5D68C','#C9A03C'],['#F55A7A','#C92E4E']]
+};
+const FUN_FACTS = {
+  common: "Common Sprouts are said to hum a tiny, tuneless little song when nobody's listening.",
+  common_1: "Gardeners swear finding a Clover Sprig on a rainy morning brings an extra-cozy afternoon.",
+  common_2: "Dew Moss never actually needs watering — it just borrows a little dew from the morning air.",
+  common_3: "Sunny Sprout always leans a few degrees toward the brightest window in the room.",
+  common_4: "Meadow Sprig smells faintly of fresh-cut grass, even indoors, even in winter.",
+  uncommon: "Uncommon Blooms open a petal wider every time their pot gets a gentle compliment.",
+  uncommon_1: "Legend says a Pink Peony blooming twice in one season means good news is on its way.",
+  uncommon_2: "Daisy Chain petals link together so tightly that old folk tales call it 'the friendship flower.'",
+  uncommon_3: "When the wind is just right, a Lilac Bell makes the faintest chime — too soft for most ears.",
+  uncommon_4: "Coral Bud was named for washing up, petal-shaped, on a beach that doesn't appear on any map.",
+  rare: "On clear nights, a Rare Starflower's petals are said to mirror the exact pattern of stars overhead.",
+  rare_1: "Violet Iris was once used by traveling gardeners as a natural compass — it always leans north.",
+  rare_2: "Crimson Orchid blooms exactly once per year, always on the grower's luckiest day.",
+  rare_3: "Azure Aster petals shift a shade bluer with every rainstorm they weather.",
+  rare_4: "An Amber Tulip is rumored to glow faintly warm to the touch just after sunset.",
+  epic: "Epic Moonvine only unfurls its tiny blossoms under a full moon — or a very convincing lamp.",
+  epic_1: "Frost Fern leaves stay cool to the touch no matter how warm the greenhouse gets.",
+  epic_2: "Shadow Ivy grows fastest in the dimmest corner of the room, as if it prefers a bit of mystery.",
+  epic_3: "Coral Creeper tendrils curl into little spirals whenever someone hums nearby.",
+  epic_4: "Jade Serpentine was named for the way its vine seems to slither toward warm sunlight.",
+  legendary: "The Legendary Sunblossom is said to hold a tiny piece of captured sunrise in every petal.",
+  legendary_1: "Phoenix Bloom petals turn deep red before wilting, then mysteriously bud again next season.",
+  legendary_2: "Celestial Lotus was first 'discovered' floating in a puddle that perfectly reflected the night sky.",
+  legendary_3: "Aurora Blossom petals shimmer through soft colors, like a tiny indoor aurora, once freshly watered.",
+  legendary_4: "An Eternal Rose never fully wilts — gardeners say it just quietly waits for its next admirer.",
+  wild_1: "Trailburst Blossom only opens its petals after being passed by at least a dozen footsteps.",
+  wild_2: "Puddle Iris is never found in a pot — legend says it only takes root right after rainfall.",
+  wild_3: "Wanderer's Ivy is said to grow a new leaf for every mile someone walks near it."
+};
+const SEED_TYPES = {};
+const DEX_ORDER = [];
+// Every tier gets all three acquisition categories: index0/3 -> shop-only, index1/4 -> map-only
+// (found in the wild, never sold), index2 -> both (sold in packs AND found ambiently on the map).
+const CATEGORY_CYCLE = ['shop','map','both','shop','map'];
+Object.keys(TIER_DEFAULTS).forEach(tierKey=>{
+  const tier = TIER_DEFAULTS[tierKey];
+  SPECIES_NAMES[tierKey].forEach((name, i)=>{
+    const key = tierKey + (i===0 ? '' : '_'+i);
+    const [petal, center] = TIER_HUES[tierKey][i];
+    const category = CATEGORY_CYCLE[i] || 'shop';
+    SEED_TYPES[key] = {
+      key, name, rarityLabel: tierKey.toUpperCase(), tierKey,
+      threshold: tier.thresholdBase + i*tier.thresholdStep,
+      harvest: tier.harvestBase + i*tier.harvestStep,
+      compost: tier.compostBase + i*tier.compostStep,
+      shape: tier.shape, petals: tier.petals, petal, center,
+      bg: tier.bg, tag: tier.tag, weight: tier.weight,
+      free: tierKey === 'common' && i === 0,
+      category,                    // 'shop' | 'map' | 'both'
+      mapOnly: category === 'map', // kept for readability at call sites
+      fact: FUN_FACTS[key] || "This little plant keeps its secrets close."
+    };
+    DEX_ORDER.push(key);
+  });
+});
+const WILD_SPECIES = [
+  { key:'wild_1', name:'Trailburst Blossom', tierKey:'uncommon', rarityLabel:'WILD', threshold:1900, harvest:30, compost:7, shape:'bloom', petals:6, petal:'#E39A4E', center:'#B36A28', bg:'bg-wild', tag:'rarity-wild' },
+  { key:'wild_2', name:'Puddle Iris',        tierKey:'rare',     rarityLabel:'WILD', threshold:3100, harvest:65, compost:16, shape:'bloom', petals:7, petal:'#5A8FE0', center:'#345FA0', bg:'bg-wild', tag:'rarity-wild' },
+  { key:'wild_3', name:"Wanderer's Ivy",     tierKey:'epic',     rarityLabel:'WILD', threshold:4300, harvest:120, compost:30, shape:'vine',  petals:0, petal:'#6EA85A', center:'#3E7A3A', bg:'bg-wild', tag:'rarity-wild' }
+];
+WILD_SPECIES.forEach(w=>{
+  // Extra flavor entries for the Map Only pool (on top of the CATEGORY_CYCLE map-only species above).
+  SEED_TYPES[w.key] = { ...w, weight:0, free:false, category:'map', mapOnly:true, fact: FUN_FACTS[w.key] };
+  DEX_ORDER.push(w.key);
+});
+
+const SHOP_PACKS = [
+  { id:'sprout',  name:'Sprout Pack',    cost:15,  desc:'Mostly Common seeds, small chance of Uncommon.', weights:{common:65, uncommon:30, rare:5} },
+  { id:'garden',  name:'Garden Pack',    cost:40,  desc:'Uncommon guaranteed floor, chance of rarer finds.', weights:{uncommon:45, rare:30, epic:18, legendary:7} },
+  { id:'rare',    name:'Rare Seed Pack', cost:90,  desc:'Rare guaranteed floor, strong Epic odds.', weights:{rare:55, epic:30, legendary:15} },
+  { id:'mega',    name:'Mega Pack',      cost:180, desc:'Epic guaranteed floor, best Legendary odds in the shop.', weights:{epic:60, legendary:40} },
+];
+const PACK_VISUALS = {
+  sprout: { primary:'#A9C98B', secondary:'#5C7A44', label:'SPROUT PACK' },
+  garden: { primary:'#DE8D95', secondary:'#B85F68', label:'GARDEN PACK' },
+  rare:   { primary:'#9C82C4', secondary:'#6E4FA0', label:'RARE PACK' },
+  mega:   { primary:'#F5C24B', secondary:'#C98A1C', label:'MEGA PACK' }
+};
+
+/* ===================== WEATHER (demo cycle, real-data-ready) ===================== */
+const WEATHER_TYPES = ['sunny','cloudy','rainy','snowy'];
+const WEATHER_ICONS = { sunny:'☀️ Sunny', cloudy:'☁️ Cloudy', rainy:'🌧️ Rainy', snowy:'❄️ Snowy' };
+let weatherIndex = 0;
+const WeatherProvider = {
+  async getCurrentWeather(){ return WEATHER_TYPES[weatherIndex]; },
+  async getUserLocation(){ return null; }
+};
+function cycleWeather(){
+  weatherIndex = (weatherIndex + 1) % WEATHER_TYPES.length;
+  state.weather = WEATHER_TYPES[weatherIndex];
+  if(state.tab === 'garden' && !state.modal) render();
+}
+
+/* ===================== MAP: spawn pool, geofencing, POIs ===================== */
+const COLLECT_RADIUS_M = 35;
+const GPS_JITTER_BUFFER_M = 12;
+const DEMO_CENTER = { lat: 49.2827, lon: -123.1207 };
+const VIEWPORT_RADIUS_M = 100;    // ~200m window shown around the player at once
+const SEED_RADIUS_M = 500;        // seeds may spawn up to 500m from the player
+
+// Ambient seeds: always 2-3 alive at once, drawn from the "Both" (shop+map) pool, weighted so
+// commons are frequent and legendaries are rare.
+const AMBIENT_TARGET_MIN = 2;
+const AMBIENT_TARGET_MAX = 3;
+const AMBIENT_TIER_WEIGHTS = { common:48, uncommon:28, rare:15, epic:7, legendary:2 };
+const RESPAWN_COOLDOWN_MIN_MS = 10*60*1000;  // 10 min
+const RESPAWN_COOLDOWN_MAX_MS = 30*60*1000;  // 30 min
+
+// Special timed spawns: Map Only pool, every 2-4h, rarer tiers correspondingly less likely.
+const SPECIAL_INTERVAL_MIN_MS = 2*60*60*1000; // 2h
+const SPECIAL_INTERVAL_MAX_MS = 4*60*60*1000; // 4h
+const SPECIAL_TIER_WEIGHTS = { common:32, uncommon:30, rare:22, epic:11, legendary:5 };
+
+const SEED_LIFESPAN_MS = 12*60*60*1000; // every spawn expires 12h after it appears
+const MAP_TICK_MS = 20000;              // world-tick cadence for expiration/respawn/special checks
+const MAP_SAVE_DEBOUNCE_MS = 500;
+
+function randBetween(min, max){ return min + Math.random()*(max-min); }
+
+// Small, hand-placed cluster used only when real OSM POI data can't be fetched
+// (offline, blocked network, or a genuinely POI-sparse rural area). Purely decorative context —
+// seeds are never snapped to these; see organicPointNear().
+const POI_FALLBACK_DEFS = [
+  {type:'cafe',       icon:'☕', label:'Sunny Corner Café', angle:0.3, dist:120},
+  {type:'park',       icon:'🌳', label:'Willow Park',        angle:2.1, dist:260},
+  {type:'building',   icon:'🏢', label:'Old Greenhouse',     angle:4.0, dist:180},
+  {type:'restaurant', icon:'🍽️', label:'The Garden Table',   angle:5.2, dist:340}
+];
+function offsetLatLon(center, distM, angleRad){
+  const dLat = (distM*Math.cos(angleRad))/111320;
+  const dLon = (distM*Math.sin(angleRad))/(111320*Math.cos(center.lat*Math.PI/180 || 0.0001));
+  return { lat: center.lat+dLat, lon: center.lon+dLon };
+}
+// Uniform-area random point in an annulus [minM,maxM] around center — organic placement,
+// never anchored to a POI, business name, or structural landmark.
+function organicPointNear(center, minM, maxM){
+  const angle = Math.random()*Math.PI*2;
+  const r = Math.sqrt(Math.random()*(maxM*maxM - minM*minM) + minM*minM);
+  return offsetLatLon(center, r, angle);
+}
+function generateFallbackPOIs(center){
+  return POI_FALLBACK_DEFS.map(d=>({ ...d, ...offsetLatLon(center, d.dist, d.angle) }));
+}
+function boundsForRadius(center, radiusM){
+  const dLat = radiusM/111320;
+  const dLon = radiusM/(111320*Math.cos(center.lat*Math.PI/180 || 0.0001));
+  return L.latLngBounds(
+    [center.lat-dLat, center.lon-dLon],
+    [center.lat+dLat, center.lon+dLon]
+  );
+}
+// Real OpenStreetMap POI lookup (cafes, restaurants, parks, buildings) within the 500m seed radius.
+// This is purely decorative map context — it never determines where a seed spawns.
+// Falls back to the small hand-placed cluster above if the request fails, times out, or is empty.
+async function fetchOSMPOIs(center){
+  const query = `[out:json][timeout:10];(`
+    + `node["amenity"~"^(cafe|restaurant|fast_food|bar|pub)$"](around:${SEED_RADIUS_M},${center.lat},${center.lon});`
+    + `node["leisure"="park"](around:${SEED_RADIUS_M},${center.lat},${center.lon});`
+    + `node["building"]["name"](around:${SEED_RADIUS_M},${center.lat},${center.lon});`
+    + `);out center 25;`;
+  const url = 'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query);
+  const ctrl = new AbortController();
+  const timer = setTimeout(()=>ctrl.abort(), 6500);
+  try{
+    const res = await fetch(url, {signal: ctrl.signal});
+    clearTimeout(timer);
+    if(!res.ok) throw new Error('Overpass HTTP '+res.status);
+    const data = await res.json();
+    const pois = (data.elements || []).map(el=>{
+      const tags = el.tags || {};
+      const lat = el.lat ?? (el.center && el.center.lat);
+      const lon = el.lon ?? (el.center && el.center.lon);
+      if(lat == null || lon == null) return null;
+      let type='building', icon='🏢';
+      if(/^(cafe)$/.test(tags.amenity)){ type='cafe'; icon='☕'; }
+      else if(/^(restaurant|fast_food)$/.test(tags.amenity)){ type='restaurant'; icon='🍽️'; }
+      else if(/^(bar|pub)$/.test(tags.amenity)){ type='restaurant'; icon='🍹'; }
+      else if(tags.leisure === 'park'){ type='park'; icon='🌳'; }
+      const genericLabel = type==='cafe' ? 'Cozy Café' : type==='park' ? 'Local Park' : type==='restaurant' ? 'Local Eatery' : 'Nearby Building';
+      return { type, icon, label: tags.name || genericLabel, lat, lon };
+    }).filter(Boolean);
+    return pois;
+  }catch(e){
+    clearTimeout(timer);
+    console.error('Flora OSM POI fetch failed, using fallback cluster:', e);
+    return null; // signal caller to use the fallback
+  }
+}
+async function loadNearbyPOIs(center){
+  const osm = await fetchOSMPOIs(center);
+  if(osm && osm.length) return osm.slice(0, 20);
+  return generateFallbackPOIs(center);
+}
+function getPlayerCoords(){
+  if(state.mapLocation.status === 'granted') return {lat: state.mapLocation.lat, lon: state.mapLocation.lon};
+  return DEMO_CENTER;
+}
+function haversineMeters(lat1,lon1,lat2,lon2){
+  const R = 6371000;
+  const toRad = d => d*Math.PI/180;
+  const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+
+/* ===================== LEVEL / XP CURVE ===================== */
+function cumulativeStepsForLevel(level){
+  if(level <= 1) return 0;
+  return Math.round(300 * Math.pow(level - 1, 1.7));
+}
+function getLevelFromSteps(steps){
+  let level = 1;
+  while(cumulativeStepsForLevel(level+1) <= steps && level < 200) level++;
+  return level;
+}
+function stepsForNextLevel(level){ return cumulativeStepsForLevel(level+1); }
+function packTierForLevel(level){
+  if(level >= 15) return 'mega';
+  if(level >= 8) return 'rare';
+  if(level >= 3) return 'garden';
+  return 'sprout';
+}
+function checkLevelUp(){
+  let leveledAny = false;
+  while(getLevelFromSteps(state.totalSteps) > state.level){
+    state.level += 1;
+    const tierId = packTierForLevel(state.level);
+    const coinsReward = 20 * state.level;
+    state.coins += coinsReward;
+    state.totalCoinsEarned += coinsReward;
+    state.pendingLevelPacks.push(tierId);
+    toast(`🌟 Level ${state.level}! +${coinsReward}¢ and a free ${SHOP_PACKS.find(p=>p.id===tierId).name}!`);
+    leveledAny = true;
+  }
+  if(leveledAny && !state.modal){ openNextLevelPack(); }
+  return leveledAny;
+}
+function openNextLevelPack(){
+  if(state.pendingLevelPacks.length === 0){ state.isLevelPackFlow = false; return; }
+  const packId = state.pendingLevelPacks.shift();
+  state.isLevelPackFlow = true;
+  state.activePackId = packId;
+  state.revealSeed = rollPack(SHOP_PACKS.find(p=>p.id===packId));
+  state.modal = 'tearing';
+  render();
+}
+
+/* ===================== STATE ===================== */
+let seedUid = 100;
+let state = {
+  coins: 0,
+  tab: 'garden',
+  level: 1,
+  pots: [null, null, null],
+  pouch: [],
+  pendingLevelPacks: [],
+  isLevelPackFlow: false,
+  plantTarget: null,
+  plantSelectedUid: null,
+  compostTargetUid: null,
+  inspectPotIndex: null,
+  modal: null,
+  revealSeed: null,
+  activePackId: null,
+  celebrateSpecies: null,
+  pendingCelebration: null,
+  lastReward: null,
+  totalSteps: 0,
+  totalHarvested: 0,
+  totalCoinsEarned: 0,
+  dex: {},
+  discovered: {},
+  dexHasUnseenDiscovery: false,
+  settings: { music:false, sfx:true },
+  streak: null,
+  weather: 'sunny',
+  mapLocation: { status:'idle', lat:null, lon:null },
+  mapSpawns: [],           // {uid,key,lat,lon,kind:'ambient'|'special',spawnedAt,expiresAt}
+  mapRespawnQueue: [],     // pending ambient respawn cooldowns: {readyAt}
+  nextSpecialSpawnAt: null,
+  ambientTargetCount: null,
+  mapPOIs: [],
+  notifPermission: (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported'
+};
+state.discovered['common'] = true;
+let lastRenderedTab = null;
+
+/* ===================== AUDIO (C418-style sparse ambient notes) ===================== */
+let audioCtx = null;
+let musicTimer = null;
+const AMBIENT_SCALE = [220.00, 246.94, 261.63, 293.66, 329.63, 392.00, 440.00];
+function ensureAudio(){
+  if(!audioCtx){
+    try{ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ audioCtx = null; }
+  }
+  return audioCtx;
+}
+function playTone(freq, startTime, peakGain, totalDur, waveType){
+  const ctx = ensureAudio(); if(!ctx) return;
+  const osc = ctx.createOscillator();
+  osc.type = waveType; osc.frequency.value = freq;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass'; filter.frequency.value = 1800;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, startTime);
+  gain.gain.linearRampToValueAtTime(peakGain, startTime + totalDur*0.28);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + totalDur);
+  osc.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+  osc.start(startTime); osc.stop(startTime + totalDur + 0.1);
+}
+function playAmbientNote(){
+  const ctx = ensureAudio(); if(!ctx) return;
+  try{
+    const now = ctx.currentTime;
+    const freq = AMBIENT_SCALE[Math.floor(Math.random()*AMBIENT_SCALE.length)];
+    playTone(freq, now, 0.055, 4.2, Math.random()<0.5 ? 'sine':'triangle');
+    if(Math.random() < 0.3) playTone(freq*1.5, now+0.35, 0.03, 4.6, 'sine');
+  }catch(e){ console.error('Flora music error:', e); }
+}
+function scheduleNextNote(){
+  if(!state.settings.music) return;
+  const delay = 2200 + Math.random()*3200;
+  musicTimer = setTimeout(()=>{ playAmbientNote(); scheduleNextNote(); }, delay);
+}
+function startMusic(){ if(musicTimer) return; scheduleNextNote(); }
+function stopMusic(){ if(musicTimer){ clearTimeout(musicTimer); musicTimer = null; } }
+function playSfx(type){
+  if(!state.settings.sfx) return;
+  const ctx = ensureAudio(); if(!ctx) return;
+  try{
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    let freq=440, dur=0.15, waveType='sine';
+    if(type==='coin'){ freq=880; dur=0.12; waveType='triangle'; }
+    else if(type==='plant'){ freq=520; dur=0.18; waveType='sine'; }
+    else if(type==='harvest'){ freq=660; dur=0.25; waveType='sine'; }
+    else if(type==='pack'){ freq=740; dur=0.2; waveType='square'; }
+    osc.type = waveType; osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.15, now+0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now+dur);
+    osc.start(now); osc.stop(now+dur+0.02);
+  }catch(e){ console.error('Flora sfx error:', e); }
+}
+function toggleMusic(){ state.settings.music = !state.settings.music; if(state.settings.music) startMusic(); else stopMusic(); render(); }
+function toggleSfx(){ state.settings.sfx = !state.settings.sfx; render(); }
+
+/* ===================== HELPERS ===================== */
+function fmt(n){ return n.toLocaleString(); }
+function toast(msg){
+  const stack = document.getElementById('toastStack');
+  if(!stack) return;
+  while(stack.children.length >= 3){ stack.firstChild.remove(); }
+  const el = document.createElement('div');
+  el.className = 'toast'; el.textContent = msg;
+  stack.appendChild(el);
+  setTimeout(()=> el.remove(), 2100);
+}
+function pulseNav(tab){
+  const btn = document.querySelector(`.nav-btn[data-tab="${tab}"]`);
+  if(!btn) return;
+  btn.classList.add('pulse');
+  setTimeout(()=> btn.classList.remove('pulse'), 650);
+}
+function pickTier(weights){
+  const entries = Object.entries(weights).filter(([k,w])=> w>0);
+  const total = entries.reduce((s,[,w])=> s+w, 0);
+  let r = Math.random()*total;
+  for(const [k,w] of entries){ if(r<w) return k; r-=w; }
+  return entries[0][0];
+}
+function pickSeedFromTier(tierKey){
+  const candidates = DEX_ORDER.filter(k=> SEED_TYPES[k].tierKey===tierKey && !SEED_TYPES[k].free && SEED_TYPES[k].category !== 'map');
+  return candidates[Math.floor(Math.random()*candidates.length)];
+}
+function rollPack(pack){ return pickSeedFromTier(pickTier(pack.weights)); }
+function checkDiscovery(typeKey){
+  if(state.discovered[typeKey]) return false;
+  state.discovered[typeKey] = true;
+  state.dexHasUnseenDiscovery = true;
+  return true;
+}
+function hexToRgb(hex){
+  hex = hex.replace('#','');
+  if(hex.length===3) hex = hex.split('').map(c=>c+c).join('');
+  const n = parseInt(hex,16);
+  return { r:(n>>16)&255, g:(n>>8)&255, b:n&255 };
+}
+function lerpColor(hexA, hexB, t){
+  const a = hexToRgb(hexA), b = hexToRgb(hexB);
+  const r = Math.round(a.r + (b.r-a.r)*t);
+  const g = Math.round(a.g + (b.g-a.g)*t);
+  const bl = Math.round(a.b + (b.b-a.b)*t);
+  return `rgb(${r},${g},${bl})`;
+}
+const LEAF_GREEN = '#5B7A4F';
+
+/* ===================== DAILY STREAK (persistent) ===================== */
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function isYesterday(dateStr){
+  if(!dateStr) return false;
+  const diff = Math.round((new Date(todayStr()) - new Date(dateStr))/86400000);
+  return diff === 1;
+}
+function streakClaimable(){ return !state.streak || state.streak.lastClaim !== todayStr(); }
+function nextStreakDay(){
+  if(!state.streak || !state.streak.lastClaim) return 1;
+  if(state.streak.lastClaim === todayStr()) return state.streak.count;
+  if(isYesterday(state.streak.lastClaim)) return state.streak.count + 1;
+  return 1;
+}
+function rewardForDay(day){
+  const cycle = ((day-1) % 7) + 1;
+  const coins = 10 + cycle*8;
+  let seedKey = null;
+  if(cycle===3 || cycle===5) seedKey = pickSeedFromTier('uncommon');
+  if(cycle===7) seedKey = pickSeedFromTier('rare');
+  return {coins, seedKey, cycle};
+}
+async function initStreak(){
+  let data = null;
+  try{
+    const res = await window.storage.get('flora_daily_streak', false);
+    if(res && res.value) data = JSON.parse(res.value);
+  }catch(e){ data = null; }
+  state.streak = data || { count:0, lastClaim:null };
+  render();
+}
+async function claimDailyReward(){
+  const day = nextStreakDay();
+  if(state.streak && state.streak.lastClaim === todayStr()) return;
+  const reward = rewardForDay(day);
+  state.coins += reward.coins;
+  state.totalCoinsEarned += reward.coins;
+  let isNew = false;
+  if(reward.seedKey){
+    state.pouch.push({uid: seedUid++, type: reward.seedKey});
+    isNew = checkDiscovery(reward.seedKey);
+  }
+  state.streak = { count: day, lastClaim: todayStr() };
+  try{ await window.storage.set('flora_daily_streak', JSON.stringify(state.streak), false); }catch(e){ console.error('Flora storage error:', e); }
+  state.lastReward = reward;
+  state.pendingCelebration = isNew ? reward.seedKey : null;
+  state.modal = 'streakReward';
+  playSfx('coin');
+  render();
+}
+function closeChainedModal(){
+  if(state.pendingCelebration){
+    const key = state.pendingCelebration;
+    state.pendingCelebration = null;
+    state.modal = 'newSpecies';
+    state.celebrateSpecies = key;
+    render();
+    return;
+  }
+  if(state.isLevelPackFlow && state.pendingLevelPacks.length > 0){
+    openNextLevelPack();
+    return;
+  }
+  state.isLevelPackFlow = false;
+  state.modal = null;
+  render();
+}
+
+/* ===================== MAP: geolocation, notifications, spawns, Leaflet lifecycle ===================== */
+let leafletMapInstance = null;
+let playerMarker = null;
+let spawnMarkers = {};       // uid -> Leaflet marker
+let poiMarkers = [];
+let watchId = null;
+let mapGeneration = 0;       // bumped on every init/destroy so stale async work (OSM fetch) is ignored
+let lastGeoUpdateTs = 0;
+const GEO_UPDATE_MIN_INTERVAL_MS = 3000; // throttle heavier map work (recenter/marker move) to preserve battery
+let mapWorldTimer = null;    // world-tick interval handle (expiration / respawn / special spawns)
+let mapStateLoaded = false;  // guards against ticking before persisted state has loaded
+
+let compassEnabled = false;
+let compassHandler = null;
+let deviceHeading = 0;
+
+function mapLocationText(){
+  const loc = state.mapLocation;
+  if(loc.status==='granted') return `📍 ${loc.lat.toFixed(4)}, ${loc.lon.toFixed(4)}`;
+  if(loc.status==='denied') return '📍 Location unavailable — showing demo area';
+  if(loc.status==='locating') return '📍 Locating...';
+  return '📍 Location not enabled yet';
+}
+function requestLocation(){
+  if(!navigator.geolocation){ state.mapLocation = {status:'denied', lat:null, lon:null}; render(); return; }
+  state.mapLocation = {status:'locating', lat:null, lon:null};
+  render();
+  try{
+    if(watchId !== null) navigator.geolocation.clearWatch(watchId); // never stack multiple watches
+    watchId = navigator.geolocation.watchPosition(
+      pos=>{
+        state.mapLocation = {status:'granted', lat:pos.coords.latitude, lon:pos.coords.longitude};
+        // Cheap UI updates happen every time...
+        const chip = document.getElementById('mapLocChip');
+        if(chip) chip.textContent = mapLocationText();
+        const btnWrap = document.getElementById('mapLocBtnWrap');
+        if(btnWrap && btnWrap.querySelector('[data-action="enable-location"]')){
+          btnWrap.querySelector('[data-action="enable-location"]').remove();
+        }
+        // ...but recentering the map / touching markers is throttled to save battery.
+        const now = Date.now();
+        if(now - lastGeoUpdateTs < GEO_UPDATE_MIN_INTERVAL_MS) return;
+        lastGeoUpdateTs = now;
+        if(leafletMapInstance){
+          leafletMapInstance.setView([pos.coords.latitude, pos.coords.longitude], leafletMapInstance.getZoom(), {animate:true});
+          updatePlayerMarkerOnMap();
+          updateRadarArrows();
+        }
+      },
+      err=>{ console.error('Flora geolocation error:', err); state.mapLocation = {status:'denied', lat:null, lon:null}; render(); },
+      { enableHighAccuracy:true, timeout:10000, maximumAge:5000 }
+    );
+  }catch(e){ console.error('Flora geolocation setup error:', e); state.mapLocation = {status:'denied', lat:null, lon:null}; render(); }
+}
+function requestNotifications(){
+  try{
+    if(typeof Notification === 'undefined') return;
+    Notification.requestPermission().then(perm=>{ state.notifPermission = perm; render(); });
+  }catch(e){ console.error('Flora notification permission error:', e); }
+}
+function sendLocalNotification(title, body){
+  try{
+    if(typeof Notification === 'undefined') return;
+    if(Notification.permission === 'granted') new Notification(title, {body});
+  }catch(e){ console.error('Flora notification error:', e); }
+}
+
+/* ---- Compass / directional heading ---- */
+function updatePlayerHeading(heading){
+  deviceHeading = heading;
+  if(!playerMarker) return;
+  const el = playerMarker.getElement ? playerMarker.getElement() : null;
+  if(!el) return;
+  const arrow = el.querySelector('.map-player-arrow');
+  if(arrow) arrow.style.transform = `rotate(${heading}deg)`;
+}
+function handleOrientationEvent(e){
+  let heading = null;
+  if(typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)){
+    heading = e.webkitCompassHeading; // iOS Safari: already degrees clockwise from true north
+  } else if(e.alpha !== null && e.alpha !== undefined){
+    heading = 360 - e.alpha; // approximate compass heading from device orientation
+  }
+  if(heading !== null && !isNaN(heading)) updatePlayerHeading(((heading % 360) + 360) % 360);
+}
+function attachCompassListener(){
+  if(compassHandler) return;
+  compassHandler = handleOrientationEvent;
+  if('ondeviceorientationabsolute' in window){
+    window.addEventListener('deviceorientationabsolute', compassHandler, true);
+  } else if(typeof DeviceOrientationEvent !== 'undefined'){
+    window.addEventListener('deviceorientation', compassHandler, true);
+  }
+}
+function detachCompassListener(){
+  if(!compassHandler) return;
+  window.removeEventListener('deviceorientationabsolute', compassHandler, true);
+  window.removeEventListener('deviceorientation', compassHandler, true);
+  compassHandler = null;
+}
+function requestCompass(){
+  try{
+    if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+      // iOS 13+ requires an explicit user-gesture permission prompt.
+      DeviceOrientationEvent.requestPermission().then(perm=>{
+        if(perm === 'granted'){ compassEnabled = true; attachCompassListener(); render(); }
+        else toast('Compass permission was not granted.');
+      }).catch(e=>{ console.error('Flora compass permission error:', e); toast('Could not enable compass on this device.'); });
+    } else if(typeof DeviceOrientationEvent !== 'undefined'){
+      compassEnabled = true;
+      attachCompassListener();
+      render();
+    } else {
+      toast('Compass not supported on this device.');
+    }
+  }catch(e){ console.error('Flora compass setup error:', e); }
+}
+
+/* ---- Persistence: ambient/special spawn state survives reloads (window.storage, best-effort) ---- */
+let mapSaveTimer = null;
+function saveMapStateDebounced(){
+  if(mapSaveTimer) clearTimeout(mapSaveTimer);
+  mapSaveTimer = setTimeout(async ()=>{
+    try{
+      if(!window.storage) return;
+      await window.storage.set('flora_map_state', JSON.stringify({
+        spawns: state.mapSpawns,
+        respawnQueue: state.mapRespawnQueue,
+        nextSpecialSpawnAt: state.nextSpecialSpawnAt,
+        ambientTargetCount: state.ambientTargetCount
+      }), false);
+    }catch(e){ console.error('Flora map state save error:', e); }
+  }, MAP_SAVE_DEBOUNCE_MS);
+}
+async function loadMapPersistence(){
+  try{
+    if(window.storage){
+      const res = await window.storage.get('flora_map_state', false);
+      if(res && res.value){
+        const data = JSON.parse(res.value);
+        state.mapSpawns = Array.isArray(data.spawns) ? data.spawns : [];
+        state.mapRespawnQueue = Array.isArray(data.respawnQueue) ? data.respawnQueue : [];
+        state.nextSpecialSpawnAt = typeof data.nextSpecialSpawnAt === 'number' ? data.nextSpecialSpawnAt : null;
+        state.ambientTargetCount = data.ambientTargetCount || null;
+      }
+    }
+  }catch(e){ console.error('Flora map state load error:', e); }
+  if(!state.ambientTargetCount){
+    state.ambientTargetCount = AMBIENT_TARGET_MIN + Math.floor(Math.random()*(AMBIENT_TARGET_MAX-AMBIENT_TARGET_MIN+1));
+  }
+  if(!state.nextSpecialSpawnAt){
+    state.nextSpecialSpawnAt = Date.now() + randBetween(SPECIAL_INTERVAL_MIN_MS, SPECIAL_INTERVAL_MAX_MS);
+  }
+  mapStateLoaded = true;
+  mapWorldTick(); // reconcile immediately: prune anything that expired while the app was closed
+}
+
+/* ---- Wild seed spawning: organic placement (never snapped to POIs), category-aware, timed & expiring ---- */
+function addSpawnToState(key, lat, lon, kind){
+  const now = Date.now();
+  const spawn = { uid: 'spawn_'+(seedUid++), key, lat, lon, kind, spawnedAt: now, expiresAt: now + SEED_LIFESPAN_MS };
+  state.mapSpawns.push(spawn);
+  if(state.tab === 'map' && leafletMapInstance){ addSpawnMarker(spawn); updateRadarArrows(); }
+  saveMapStateDebounced();
+  return spawn;
+}
+// Ambient seeds pull ONLY from the "Both" (shop+map) category pool, weighted so commons are common.
+function spawnAmbientSeed(){
+  const player = getPlayerCoords();
+  const tierKey = pickTier(AMBIENT_TIER_WEIGHTS);
+  let key = pickSpeciesForCategoryTier('both', tierKey);
+  if(!key) key = DEX_ORDER.find(k=> SEED_TYPES[k].category==='both'); // defensive fallback, should never trigger
+  if(!key) return;
+  const { lat, lon } = organicPointNear(player, 15, SEED_RADIUS_M);
+  addSpawnToState(key, lat, lon, 'ambient');
+}
+// Special timed seeds pull ONLY from the "Map Only" category pool — rarer tiers spawn less often.
+function spawnSpecialSeed(){
+  const player = getPlayerCoords();
+  const tierKey = pickTier(SPECIAL_TIER_WEIGHTS);
+  let key = pickSpeciesForCategoryTier('map', tierKey);
+  if(!key) key = DEX_ORDER.find(k=> SEED_TYPES[k].category==='map');
+  if(!key) return;
+  const { lat, lon } = organicPointNear(player, 20, SEED_RADIUS_M);
+  addSpawnToState(key, lat, lon, 'special');
+  const type = SEED_TYPES[key];
+  const label = type.rarityLabel.charAt(0) + type.rarityLabel.slice(1).toLowerCase();
+  toast(`✨ A ${label} ${type.name} has sprouted nearby!`);
+  sendLocalNotification('Flora', `A ${label} ${type.name} has sprouted nearby!`);
+}
+function pickSpeciesForCategoryTier(category, tierKey){
+  const candidates = DEX_ORDER.filter(k=> SEED_TYPES[k].tierKey===tierKey && SEED_TYPES[k].category===category);
+  if(!candidates.length) return null;
+  return candidates[Math.floor(Math.random()*candidates.length)];
+}
+// Keeps 2-3 ambient seeds alive at all times. Losing one (collected or expired) queues a
+// 10-30 min respawn cooldown UNLESS the map is completely empty, in which case it refills
+// immediately so the player is never staring at nothing.
+function ambientMaintenance(){
+  if(!mapStateLoaded) return;
+  const now = Date.now();
+  const stillPending = [];
+  state.mapRespawnQueue.forEach(item=>{
+    if(now >= item.readyAt) spawnAmbientSeed();
+    else stillPending.push(item);
+  });
+  state.mapRespawnQueue = stillPending;
+  let ambientActive = state.mapSpawns.filter(s=>s.kind==='ambient').length;
+  let deficit = state.ambientTargetCount - ambientActive - state.mapRespawnQueue.length;
+  while(deficit > 0){
+    if(ambientActive === 0){ spawnAmbientSeed(); ambientActive++; }
+    else { state.mapRespawnQueue.push({ readyAt: now + randBetween(RESPAWN_COOLDOWN_MIN_MS, RESPAWN_COOLDOWN_MAX_MS) }); }
+    deficit--;
+  }
+  saveMapStateDebounced();
+}
+function maybeFireSpecialSpawn(){
+  const now = Date.now();
+  if(!state.nextSpecialSpawnAt){ state.nextSpecialSpawnAt = now + randBetween(SPECIAL_INTERVAL_MIN_MS, SPECIAL_INTERVAL_MAX_MS); }
+  if(now >= state.nextSpecialSpawnAt){
+    spawnSpecialSeed();
+    // Reschedule from "now" (rather than drifting off the missed timestamp) so a long-closed
+    // app doesn't fire a burst of catch-up notifications.
+    state.nextSpecialSpawnAt = now + randBetween(SPECIAL_INTERVAL_MIN_MS, SPECIAL_INTERVAL_MAX_MS);
+    saveMapStateDebounced();
+  }
+}
+// Strict 12h lifespan — checked against Date.now() so time drift (app backgrounded, laptop
+// asleep, clock changes) can never leave a stale seed on the map.
+function pruneExpiredSpawns(){
+  const now = Date.now();
+  const expired = state.mapSpawns.filter(s=> s.expiresAt && now >= s.expiresAt);
+  if(!expired.length) return;
+  expired.forEach(s=> removeSpawnMarker(s.uid));
+  state.mapSpawns = state.mapSpawns.filter(s=> !(s.expiresAt && now >= s.expiresAt));
+  saveMapStateDebounced();
+}
+// Single world tick: expiration -> ambient upkeep -> special-event check -> refresh what's on screen.
+function mapWorldTick(){
+  try{
+    if(!mapStateLoaded) return;
+    pruneExpiredSpawns();
+    ambientMaintenance();
+    maybeFireSpecialSpawn();
+    if(state.tab === 'map' && leafletMapInstance){ syncSpawnMarkers(); updateRadarArrows(); }
+  }catch(e){ console.error('Flora map world-tick error:', e); }
+}
+function collectWildSpawn(uid){
+  const idx = state.mapSpawns.findIndex(s=>s.uid===uid);
+  if(idx === -1) return;
+  const spawn = state.mapSpawns[idx];
+  const player = getPlayerCoords();
+  const d = haversineMeters(player.lat, player.lon, spawn.lat, spawn.lon);
+  if(d > COLLECT_RADIUS_M + GPS_JITTER_BUFFER_M){
+    toast(`🚶 Too far — you're about ${Math.round(d)}m away. Get within ${COLLECT_RADIUS_M}m!`);
+    return;
+  }
+  const key = spawn.key;
+  state.pouch.push({uid: seedUid++, type: key});
+  state.mapSpawns.splice(idx, 1);
+  removeSpawnMarker(uid);
+  if(spawn.kind === 'ambient') ambientMaintenance();
+  updateRadarArrows();
+  saveMapStateDebounced();
+  playSfx('coin');
+  const isNew = checkDiscovery(key);
+  if(isNew){ state.modal = 'newSpecies'; state.celebrateSpecies = key; render(); }
+  else { toast(`Found a wild ${SEED_TYPES[key].name}! Added to pouch.`); }
+}
+
+/* ---- Off-screen radar: arrows pinned to the map edge pointing at seeds outside the 200m view ---- */
+function computeBearing(lat1, lon1, lat2, lon2){
+  const toRad = d=> d*Math.PI/180;
+  const phi1 = toRad(lat1), phi2 = toRad(lat2), dLon = toRad(lon2-lon1);
+  const y = Math.sin(dLon)*Math.cos(phi2);
+  const x = Math.cos(phi1)*Math.sin(phi2) - Math.sin(phi1)*Math.cos(phi2)*Math.cos(dLon);
+  return (Math.atan2(y,x)*180/Math.PI + 360) % 360;
+}
+function edgePointForBearing(bearingDeg, w, h, margin){
+  const rad = bearingDeg*Math.PI/180;
+  const dx = Math.sin(rad), dy = -Math.cos(rad); // screen space: bearing 0 (N) points up
+  const halfW = Math.max(w/2-margin, 1), halfH = Math.max(h/2-margin, 1);
+  const tX = dx!==0 ? halfW/Math.abs(dx) : Infinity;
+  const tY = dy!==0 ? halfH/Math.abs(dy) : Infinity;
+  const t = Math.min(tX,tY);
+  return { x: w/2 + dx*t, y: h/2 + dy*t };
+}
+function updateRadarArrows(){
+  if(!leafletMapInstance) return;
+  const layer = document.getElementById('radarLayer');
+  const scene = document.querySelector('.map-scene');
+  if(!layer || !scene) return;
+  const w = scene.clientWidth, h = scene.clientHeight;
+  if(!w || !h){ layer.innerHTML = ''; return; }
+  const player = getPlayerCoords();
+  const offScreen = state.mapSpawns.filter(s=> haversineMeters(player.lat, player.lon, s.lat, s.lon) > VIEWPORT_RADIUS_M);
+  layer.innerHTML = offScreen.map(spawn=>{
+    const dist = Math.round(haversineMeters(player.lat, player.lon, spawn.lat, spawn.lon));
+    const bearing = computeBearing(player.lat, player.lon, spawn.lat, spawn.lon);
+    const { x, y } = edgePointForBearing(bearing, w, h, 22);
+    const type = SEED_TYPES[spawn.key];
+    const icon = type.tierKey==='common' ? '🌱' : type.tierKey==='uncommon' ? '🌸' : type.tierKey==='rare' ? '💜' : type.tierKey==='epic' ? '✨' : '👑';
+    return `<div class="radar-arrow" data-spawn="${spawn.uid}" style="left:${x}px; top:${y}px; transform:translate(-50%,-50%);">
+      <div class="radar-arrow-shape spawn-${type.tierKey}" style="transform:rotate(${bearing}deg);">
+        <span class="radar-arrow-tip"></span><span style="transform:rotate(${-bearing}deg); display:block;">${icon}</span>
+      </div>
+      <div class="radar-arrow-label">${dist}m</div>
+    </div>`;
+  }).join('');
+  layer.querySelectorAll('.radar-arrow').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const spawn = state.mapSpawns.find(s=>s.uid===el.dataset.spawn);
+      if(spawn) toast(`🧭 ${SEED_TYPES[spawn.key].name} is about ${Math.round(haversineMeters(player.lat, player.lon, spawn.lat, spawn.lon))}m away.`);
+    });
+  });
+}
+
+/* ---- Leaflet map lifecycle ---- */
+async function initLeafletMap(){
+  const myGeneration = ++mapGeneration;
+  try{
+    if(typeof L === 'undefined'){ console.error('Flora: Leaflet failed to load'); return; }
+    const center = getPlayerCoords();
+    leafletMapInstance = L.map('leafletMap', { zoomControl:false, attributionControl:true });
+    // Camera is intentionally locked to the player -- no free panning or zooming.
+    leafletMapInstance.dragging.disable();
+    leafletMapInstance.touchZoom.disable();
+    leafletMapInstance.doubleClickZoom.disable();
+    leafletMapInstance.scrollWheelZoom.disable();
+    leafletMapInstance.boxZoom.disable();
+    leafletMapInstance.keyboard.disable();
+    if(leafletMapInstance.tap) leafletMapInstance.tap.disable();
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      maxZoom: 19, subdomains: 'abcd'
+    }).addTo(leafletMapInstance);
+    // Fit to a ~200m window around the player, regardless of container/screen size.
+    leafletMapInstance.fitBounds(boundsForRadius(center, VIEWPORT_RADIUS_M), {animate:false});
+    // Tiles can render blank/clipped if the container size wasn't final at init time.
+    leafletMapInstance.invalidateSize();
+    setTimeout(()=>{ if(leafletMapInstance){ leafletMapInstance.invalidateSize(); updateRadarArrows(); } }, 150);
+
+    const playerIcon = L.divIcon({
+      className:'',
+      html:`<div class="map-player-wrap"><span class="map-player-pulse"></span><div class="map-player-arrow" style="transform:rotate(${deviceHeading}deg)"><svg width="26" height="26" viewBox="0 0 26 26"><path d="M13 2 L20 22 L13 17 L6 22 Z" fill="var(--moss)" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg></div></div>`,
+      iconSize:[30,30]
+    });
+    playerMarker = L.marker([center.lat, center.lon], {icon: playerIcon, interactive:false}).addTo(leafletMapInstance);
+    if(compassEnabled) attachCompassListener();
+
+    spawnMarkers = {};
+    state.mapSpawns.forEach(addSpawnMarker);
+    updateRadarArrows();
+    if(mapStateLoaded) mapWorldTick(); // catch up on expiration/respawn immediately when opening the tab
+
+    // Real OSM POIs (cafes/parks/buildings/restaurants) — purely decorative context, never tied to spawns.
+    const pois = await loadNearbyPOIs(center);
+    if(myGeneration !== mapGeneration || !leafletMapInstance) return; // player left the tab mid-fetch
+    state.mapPOIs = pois;
+    poiMarkers = state.mapPOIs.map(poi=>{
+      const icon = L.divIcon({ className:'', html:`<div class="map-poi-icon poi-${poi.type}"><span>${poi.icon}</span></div>`, iconSize:[30,30] });
+      const m = L.marker([poi.lat, poi.lon], {icon}).addTo(leafletMapInstance);
+      m.on('click', ()=> toast(`📍 ${poi.label}`));
+      return m;
+    });
+  }catch(e){ console.error('Flora map init error:', e); }
+}
+function destroyLeafletMap(){
+  mapGeneration++; // invalidates any in-flight OSM POI fetch from this session
+  detachCompassListener();
+  try{
+    if(watchId !== null && navigator.geolocation){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+    if(leafletMapInstance){ leafletMapInstance.remove(); leafletMapInstance = null; }
+    playerMarker = null; spawnMarkers = {}; poiMarkers = [];
+  }catch(e){ console.error('Flora map cleanup error:', e); }
+}
+function updatePlayerMarkerOnMap(){
+  if(!leafletMapInstance || !playerMarker) return;
+  const c = getPlayerCoords();
+  playerMarker.setLatLng([c.lat, c.lon]);
+}
+function addSpawnMarker(spawn){
+  if(!leafletMapInstance) return;
+  const type = SEED_TYPES[spawn.key];
+  const specialClass = spawn.kind === 'special' ? ' spawn-special' : '';
+  const icon = L.divIcon({
+    className:'',
+    html:`<div class="map-spawn-icon"><span class="map-spawn-pulse"></span><span class="map-spawn-mark spawn-${type.tierKey}${specialClass}">!</span></div>`,
+    iconSize:[34,34]
+  });
+  const m = L.marker([spawn.lat, spawn.lon], {icon}).addTo(leafletMapInstance);
+  m.on('click', ()=> collectWildSpawn(spawn.uid));
+  spawnMarkers[spawn.uid] = m;
+}
+function removeSpawnMarker(uid){
+  if(leafletMapInstance && spawnMarkers[uid]) leafletMapInstance.removeLayer(spawnMarkers[uid]);
+  delete spawnMarkers[uid];
+}
+function syncSpawnMarkers(){
+  if(!leafletMapInstance) return;
+  const liveUids = new Set(state.mapSpawns.map(s=>s.uid));
+  Object.keys(spawnMarkers).forEach(uid=>{ if(!liveUids.has(uid)) removeSpawnMarker(uid); });
+  state.mapSpawns.forEach(spawn=>{ if(!spawnMarkers[spawn.uid]) addSpawnMarker(spawn); });
+}
+
+/* ===================== RENDER ===================== */
+function render(){
+  try{
+    document.getElementById('coinCount').textContent = fmt(state.coins);
+    const lvlEl = document.getElementById('levelChip');
+    if(lvlEl) lvlEl.textContent = `Lv ${state.level}`;
+    document.querySelectorAll('.nav-btn').forEach(btn=>{
+      btn.classList.toggle('active', btn.dataset.tab === state.tab);
+    });
+    const badge = document.getElementById('dexBadge');
+    if(badge) badge.style.display = state.dexHasUnseenDiscovery ? 'block' : 'none';
+
+    const content = document.getElementById('content');
+    const leavingMap = lastRenderedTab === 'map' && state.tab !== 'map';
+    if(leavingMap) destroyLeafletMap();
+
+    const stayingOnMap = state.tab === 'map' && lastRenderedTab === 'map' && leafletMapInstance;
+    if(state.tab === 'garden') content.innerHTML = renderGarden();
+    else if(state.tab === 'map'){
+      if(!stayingOnMap){
+        content.innerHTML = renderMap();
+        setTimeout(initLeafletMap, 0);
+      } else {
+        const chip = document.getElementById('mapLocChip');
+        if(chip) chip.textContent = mapLocationText();
+        syncSpawnMarkers();
+        updatePlayerMarkerOnMap();
+        updateRadarArrows();
+      }
+    }
+    else if(state.tab === 'dex') content.innerHTML = renderDex();
+    else content.innerHTML = renderPouch();
+
+    lastRenderedTab = state.tab;
+    renderModal();
+  }catch(err){
+    console.error('Flora render error:', err);
+  }
+}
+
+/* ===================== PLANT SVG (staged growth, species color transitions) ===================== */
+function stemPathD(stemH, shape){
+  if(shape === 'vine') return `M46 66 C 30 ${66-stemH*0.42}, 62 ${66-stemH*0.62}, 45 ${66-stemH}`;
+  return `M46 66V${66-stemH}`;
+}
+function bloomSVG(type, stemH){
+  const flY = 66 - stemH;
+  if(type.shape === 'vine'){
+    const spots = [ [45, flY], [34, flY+16], [56, flY+9] ];
+    let clusters = '';
+    spots.forEach(([cx,cy])=>{
+      let petals = '';
+      for(let p=0;p<5;p++){
+        const ang = (Math.PI*2/5)*p;
+        const px = cx + Math.cos(ang)*5.5, py = cy + Math.sin(ang)*5.5;
+        petals += `<ellipse cx="${px}" cy="${py}" rx="4" ry="3" fill="${type.petal}" stroke="${type.center}" stroke-width="0.8" transform="rotate(${ang*180/Math.PI} ${px} ${py})"/>`;
+      }
+      clusters += `<g>${petals}<circle cx="${cx}" cy="${cy}" r="2.6" fill="${type.center}"/></g>`;
+    });
+    return `${clusters}<circle cx="34" cy="${flY-10}" r="1.6" fill="#CFF3F1" style="animation: sparkle 1.6s ease-in-out infinite;"/><circle cx="58" cy="${flY-2}" r="1.3" fill="#CFF3F1" style="animation: sparkle 1.6s ease-in-out infinite 0.5s;"/>`;
+  }
+  if(type.shape === 'radiant'){
+    let rays = '';
+    for(let r=0;r<10;r++){
+      const ang = (Math.PI*2/10)*r;
+      const x1 = 46 + Math.cos(ang)*13, y1 = flY + Math.sin(ang)*13;
+      const x2 = 46 + Math.cos(ang)*20, y2 = flY + Math.sin(ang)*20;
+      rays += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${type.petal}" stroke-width="2" stroke-linecap="round" opacity="0.55"/>`;
+    }
+    let petals = '';
+    const count = type.petals || 8;
+    for(let p=0;p<count;p++){
+      const ang = (Math.PI*2/count)*p;
+      const px = 46 + Math.cos(ang)*11, py = flY + Math.sin(ang)*11;
+      petals += `<ellipse cx="${px}" cy="${py}" rx="7.5" ry="5.2" fill="${type.petal}" stroke="${type.center}" stroke-width="1" transform="rotate(${ang*180/Math.PI} ${px} ${py})"/>`;
+    }
+    return `<circle cx="46" cy="${flY}" r="19" fill="${type.petal}" opacity="0.18" style="animation: pulseRing 2.2s ease-in-out infinite;"/>${rays}${petals}<circle cx="46" cy="${flY}" r="6" fill="${type.center}"/><circle cx="46" cy="${flY}" r="6" fill="none" stroke="#fff" stroke-width="1" opacity="0.6"/>`;
+  }
+  const count = type.petals || 6;
+  let petals = '';
+  for(let p=0;p<count;p++){
+    const ang = (Math.PI*2/count)*p;
+    const px = 46 + Math.cos(ang)*10, py = flY + Math.sin(ang)*10;
+    petals += `<ellipse cx="${px}" cy="${py}" rx="6.5" ry="4.5" fill="${type.petal}" stroke="${type.center}" stroke-width="1" transform="rotate(${ang*180/Math.PI} ${px} ${py})"/>`;
+  }
+  return `<g>${petals}<circle cx="46" cy="${flY}" r="5" fill="${type.center}"/></g><g opacity="0.9"><circle cx="28" cy="${flY-14}" r="2" fill="#F5D68C" style="animation: sparkle 1.6s ease-in-out infinite;"/><circle cx="64" cy="${flY-6}" r="1.6" fill="#F5D68C" style="animation: sparkle 1.6s ease-in-out infinite 0.4s;"/><circle cx="52" cy="${flY-20}" r="1.4" fill="#F5D68C" style="animation: sparkle 1.6s ease-in-out infinite 0.8s;"/></g>`;
+}
+function plantSVG(potState){
+  if(!potState){
+    return `<svg width="80" height="26" viewBox="0 0 92 30"><circle cx="46" cy="15" r="13" fill="none" stroke="#B8834F" stroke-width="2.2" stroke-dasharray="4 4"/><path d="M46 9V21M40 15H52" stroke="#B8834F" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+  }
+  const type = SEED_TYPES[potState.type];
+  const frac = Math.min(1, potState.progress / type.threshold);
+  const ready = frac >= 1;
+  const stemH = 6 + frac*46;
+  const leafCount = frac < 0.15 ? 0 : frac < 0.45 ? 2 : frac < 0.75 ? 4 : 4;
+  const sway = ready ? 'style="animation: sway 2.6s ease-in-out infinite; transform-origin: 46px 66px;"' : '';
+  let leaves = '';
+  const leafPositions = [0.35, 0.55, 0.75, 0.9];
+  for(let i=0;i<leafCount;i++){
+    const t = leafPositions[i];
+    const y = 66 - stemH*t;
+    const side = i % 2 === 0 ? -1 : 1;
+    const lx = 46 + side*3;
+    leaves += `<path d="M${lx} ${y} Q${lx + side*16} ${y-6} ${lx + side*4} ${y-16} Q${lx+side*2} ${y-8} ${lx} ${y}Z" fill="${LEAF_GREEN}" stroke="#3F5A38" stroke-width="1" stroke-linejoin="round"/>`;
+  }
+  let bloom = '';
+  if(frac >= 0.75 && frac < 1){
+    const budY = 66 - stemH;
+    const budT = Math.min(1, (frac-0.75)/0.25);
+    const budColor = lerpColor(LEAF_GREEN, type.petal, budT);
+    const budR = 3.5 + frac*3;
+    bloom = `
+      <path d="M${46-budR*0.9} ${budY+budR*0.5} Q46 ${budY+budR*1.7} ${46+budR*0.9} ${budY+budR*0.5}" fill="${LEAF_GREEN}" opacity="0.9"/>
+      <ellipse cx="46" cy="${budY}" rx="${budR*0.75}" ry="${budR}" fill="${budColor}" stroke="${type.center}" stroke-width="1"/>`;
+  } else if(ready){
+    bloom = bloomSVG(type, stemH);
+  } else if(frac < 0.15){
+    bloom = `<path d="M42 63 Q46 58 50 63" stroke="${LEAF_GREEN}" stroke-width="2" fill="none" stroke-linecap="round"/>`;
+  }
+  return `<svg width="94" height="72" viewBox="0 0 92 70" ${sway}><path d="${stemPathD(stemH, type.shape)}" stroke="#4A6B42" stroke-width="3" fill="none" stroke-linecap="round"/>${leaves}${bloom}</svg>`;
+}
+
+/* ===================== POT RENDERING (fixed shelf anchor, tap-to-inspect) ===================== */
+function potVisualInner(potState){
+  const ready = potState && (potState.progress >= SEED_TYPES[potState.type].threshold);
+  return `
+    ${ready ? `<div class="ready-badge">✨ Ready!</div>` : ''}
+    <div style="position:absolute; bottom:22px;">${plantSVG(potState)}</div>
+    <svg width="78" height="50" viewBox="0 0 88 58" style="position:relative; z-index:2;">
+      <ellipse cx="44" cy="14" rx="34" ry="7" fill="#3a2a1c" opacity="0.18"/>
+      <path d="M10 12 L18 54 Q44 60 70 54 L78 12 Z" fill="var(--terracotta)" stroke="var(--terracotta-dark)" stroke-width="2" stroke-linejoin="round"/>
+      <ellipse cx="44" cy="12" rx="34" ry="8" fill="var(--terracotta-rim)" stroke="var(--terracotta-dark)" stroke-width="2"/>
+      <ellipse cx="44" cy="12" rx="27" ry="5" fill="#5C4028"/>
+      <path d="M18 30 Q44 34 70 30" stroke="var(--terracotta-dark)" stroke-width="1.4" fill="none" opacity="0.5"/>
+    </svg>
+  `;
+}
+function potSVG(index, potState){
+  const type = potState ? SEED_TYPES[potState.type] : null;
+  return `
+  <div class="pot-slot" data-pot="${index}">
+    <div class="pot-visual" id="potVisual${index}">${potVisualInner(potState)}</div>
+    <div class="pot-label">${potState ? type.name : 'Empty pot — tap to plant'}</div>
+  </div>`;
+}
+function animatePotGrowth(index, fromProgress, toProgress){
+  const p = state.pots[index];
+  if(!p) return;
+  const stepSize = 100;
+  let interim = fromProgress;
+  function tick(){
+    interim = Math.min(toProgress, interim + stepSize);
+    const el = document.getElementById('potVisual'+index);
+    if(el){ el.innerHTML = potVisualInner({...p, progress: interim}); }
+    if(interim < toProgress){ setTimeout(tick, 90); }
+  }
+  tick();
+}
+
+/* ===================== WEATHER RENDERING ===================== */
+function skyDecoSVG(weather){
+  const showSun = weather === 'sunny';
+  const cloudOpacity = weather === 'cloudy' ? 0.95 : weather === 'sunny' ? 0.85 : 0.55;
+  return `<svg class="sky-deco" viewBox="0 0 400 260" preserveAspectRatio="none" width="100%" height="260">
+    ${showSun ? `<circle cx="335" cy="50" r="26" fill="#F7E2A8" opacity="0.9"/>` : ''}
+    <g style="animation: floatCloud 6s ease-in-out infinite alternate;"><ellipse cx="72" cy="58" rx="32" ry="14" fill="#ffffff" opacity="${cloudOpacity}"/><ellipse cx="102" cy="50" rx="22" ry="12" fill="#ffffff" opacity="${cloudOpacity}"/></g>
+    <g style="animation: floatCloud 8s ease-in-out infinite alternate-reverse;"><ellipse cx="230" cy="74" rx="26" ry="11" fill="#ffffff" opacity="${cloudOpacity*0.8}"/></g>
+  </svg>`;
+}
+function weatherLayerSVG(weather){
+  if(weather === 'rainy'){
+    let drops = '';
+    for(let i=0;i<16;i++){
+      const x = (i*26)%400 + (i%3)*6;
+      const delay = (i%7)*0.13;
+      drops += `<line x1="${x}" y1="0" x2="${x-7}" y2="22" stroke="#8FB4C9" stroke-width="2" stroke-linecap="round" opacity="0.55" style="animation: rainFall 0.85s linear infinite; animation-delay:${delay}s;"/>`;
+    }
+    return `<svg class="weather-layer" viewBox="0 0 400 300" preserveAspectRatio="none" width="100%" height="300">${drops}</svg>`;
+  }
+  if(weather === 'snowy'){
+    let flakes = '';
+    for(let i=0;i<18;i++){
+      const x = (i*23)%400 + (i%4)*5;
+      const delay = (i%8)*0.4;
+      const r = 2 + (i%3);
+      flakes += `<circle cx="${x}" cy="0" r="${r}" fill="#fff" opacity="0.85" style="animation: snowFall ${3+(i%3)}s linear infinite; animation-delay:${delay}s;"/>`;
+    }
+    return `<svg class="weather-layer" viewBox="0 0 400 300" preserveAspectRatio="none" width="100%" height="300">${flakes}</svg>`;
+  }
+  if(weather === 'cloudy'){
+    return `<svg class="weather-layer" viewBox="0 0 400 300" preserveAspectRatio="none" width="100%" height="300">
+      <ellipse cx="130" cy="66" rx="55" ry="22" fill="#bdb8a8" opacity="0.4"/>
+      <ellipse cx="280" cy="90" rx="62" ry="24" fill="#b3ada0" opacity="0.35"/>
+    </svg>`;
+  }
+  return '';
+}
+
+/* ===================== SCREENS ===================== */
+function renderGarden(){
+  const potsHtml = state.pots.map((p,i)=> potSVG(i,p)).join('');
+  const day = nextStreakDay();
+  const streakHtml = streakClaimable() ? `
+    <div class="streak-card" data-action="claim-streak">
+      <svg width="36" height="36" viewBox="0 0 40 40"><path d="M8 14L10 34C10 36 30 36 30 34L32 14" fill="#fff" stroke="#c9861e" stroke-width="1.6"/><ellipse cx="20" cy="14" rx="14" ry="4" fill="#fff5de" stroke="#c9861e" stroke-width="1.6"/></svg>
+      <div style="flex:1;"><b>🔥 Day ${day} streak ready!</b><span>Tap to claim your daily reward</span></div>
+      <button class="pill-btn primary">Claim</button>
+    </div>` : '';
+
+  return `
+    <div class="screen-title">Your Windowsill</div>
+    <div class="screen-sub">Walk to grow — tap a pot to plant or inspect it.</div>
+    ${streakHtml}
+    <div class="windowsill weather-${state.weather}">
+      <div class="weather-chip">${WEATHER_ICONS[state.weather]}</div>
+      ${skyDecoSVG(state.weather)}
+      ${weatherLayerSVG(state.weather)}
+      <div class="window-mullion-v"></div>
+      <div class="window-mullion-h"></div>
+      <div class="pots-row">${potsHtml}</div>
+      <div class="shelf"></div>
+    </div>
+    <div class="fab-wrap">
+      <button class="pill-btn fab" data-action="simulate">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M8 20L10 4M16 20L14 4" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+        Simulate Steps (+500)
+      </button>
+    </div>
+    <div class="card shop-card">
+      <div class="section-heading"><h3>🛍️ Seed Shop</h3><button class="pill-btn gold" data-action="open-shop">Browse Packs</button></div>
+      <div class="screen-sub" style="margin:0;">4 pack tiers, from cheap Sprout Packs to guaranteed-Epic Mega Packs.</div>
+    </div>
+  `;
+}
+
+function renderPouch(){
+  const items = state.pouch.map(item=>{
+    const type = SEED_TYPES[item.type];
+    return `
+    <div class="seed-card" data-seed-uid="${item.uid}">
+      <div class="seed-icon-wrap ${type.bg}">${seedIcon(type)}</div>
+      <div class="seed-info">
+        <div class="seed-name">${type.name}</div>
+        <div class="seed-tag ${type.tag}">${type.rarityLabel}</div>
+        <div class="seed-meta">${type.threshold} steps to grow</div>
+      </div>
+      <div class="seed-actions">
+        <button class="pill-btn primary" data-action="plant-request" data-uid="${item.uid}">Plant</button>
+        <button class="pill-btn soft" data-action="compost" data-uid="${item.uid}">Compost +${type.compost}¢</button>
+      </div>
+    </div>`;
+  }).join('');
+  const commonType = SEED_TYPES.common;
+  return `
+    <div class="pouch-header">
+      <div>
+        <div class="screen-title">Seed Pouch</div>
+        <div class="screen-sub" style="margin-bottom:0;">Everything you're carrying, ready to plant.</div>
+      </div>
+      <div class="composter-corner" id="composterCorner" title="Composter">
+        <svg width="20" height="20" viewBox="0 0 40 40"><path d="M8 14L10 34C10 36 30 36 30 34L32 14" fill="#B8834F" stroke="#8f5f33" stroke-width="1.6"/><ellipse cx="20" cy="14" rx="14" ry="4" fill="#DCB27E" stroke="#8f5f33" stroke-width="1.6"/></svg>
+      </div>
+    </div>
+    <div class="seed-card free" data-seed-uid="free-common">
+      <div class="seed-icon-wrap ${commonType.bg}">${seedIcon(commonType)}</div>
+      <div class="seed-info">
+        <div class="seed-name">${commonType.name}</div>
+        <div class="seed-tag ${commonType.tag}">ALWAYS FREE</div>
+        <div class="seed-meta">${commonType.threshold} steps to grow · never runs out</div>
+      </div>
+      <div class="seed-actions"><button class="pill-btn gold" data-action="plant-request" data-uid="free-common">Plant</button></div>
+    </div>
+    ${items || `<div class="empty-state">No extra seeds yet.<br/>Visit the shop or explore the Map for rarer finds! 🌱</div>`}
+  `;
+}
+
+function renderMap(){
+  const notifBtn = (typeof Notification !== 'undefined' && state.notifPermission !== 'granted') ? `<button class="pill-btn soft" data-action="enable-notifications">🔔 Enable alerts</button>` : '';
+  const locBtn = state.mapLocation.status !== 'granted' ? `<button class="pill-btn primary" data-action="enable-location">Enable Location</button>` : '';
+  const compassSupported = typeof DeviceOrientationEvent !== 'undefined';
+  const compassBtn = (compassSupported && !compassEnabled) ? `<button class="pill-btn soft" data-action="enable-compass">🧭 Enable Compass</button>` : '';
+  return `
+    <div class="screen-title">Trail Map</div>
+    <div class="screen-sub">Your view follows you, showing about 200m around your position. Radar arrows on the edge point toward seeds further out.</div>
+    <div class="map-scene"><div id="leafletMap"></div><div class="radar-layer" id="radarLayer"></div></div>
+    <div class="card" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+      <div class="screen-sub" id="mapLocChip" style="margin:0;">${mapLocationText()}</div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;" id="mapLocBtnWrap">${locBtn}${compassBtn}${notifBtn}</div>
+    </div>
+    <div class="screen-sub" style="text-align:center;">2-3 seeds always sprout organically within 500m — collect one and a replacement grows back in 10-30 min. Rarer seeds sprout on their own every few hours and vanish if left too long (12h).</div>
+  `;
+}
+
+function renderDex(){
+  const discovered = DEX_ORDER.filter(k=> state.discovered[k]).length;
+  const cards = DEX_ORDER.map(key=>{
+    const type = SEED_TYPES[key];
+    if(!state.discovered[key]){
+      return `<div class="dex-card locked"><div class="dex-icon"><svg width="34" height="34" viewBox="0 0 24 24" fill="none"><rect x="4" y="10" width="16" height="10" rx="2" fill="#c9b78e" stroke="#a9955f" stroke-width="1.4"/><path d="M8 10V7a4 4 0 018 0v3" stroke="#a9955f" stroke-width="1.6" fill="none"/></svg></div><div class="dex-name">???</div><div class="dex-count">Not discovered</div></div>`;
+    }
+    const count = state.dex[key] || 0;
+    return `<div class="dex-card"><div class="dex-icon ${type.bg}" style="border-radius:12px;">${seedIcon(type)}</div><div class="dex-name">${type.name}</div><div class="seed-tag ${type.tag}" style="margin:4px 0;">${type.rarityLabel}</div><div class="dex-count">${count>0 ? 'Harvested x'+count : 'Not yet harvested'}</div><div class="dex-fact">"${type.fact}"</div></div>`;
+  }).join('');
+  return `
+    <div class="screen-title">Flora-Dex</div>
+    <div class="screen-sub">Every plant you've ever discovered.</div>
+    <div class="dex-progress-card">
+      <div><div style="font-weight:800; font-size:15px;">Collection Progress</div><div style="font-size:12px; opacity:0.9; font-weight:700;">${discovered} of ${DEX_ORDER.length} species found</div></div>
+      <div style="font-size:22px; font-weight:800;">${Math.round(discovered/DEX_ORDER.length*100)}%</div>
+    </div>
+    <div class="dex-grid">${cards}</div>
+  `;
+}
+
+function seedIcon(type){
+  return `<svg width="28" height="28" viewBox="0 0 30 30"><ellipse cx="15" cy="19" rx="9" ry="5" fill="#5C4028" opacity="0.5"/><path d="M15 20C15 20 6 16 8 8C8 8 16 8 15 20Z" fill="${type.petal}" stroke="${type.center}" stroke-width="1"/><path d="M15 20C15 20 24 16 22 8C22 8 14 8 15 20Z" fill="${type.petal}" stroke="${type.center}" stroke-width="1" opacity="0.85"/></svg>`;
+}
+
+/* ===================== MODALS ===================== */
+let tearCleanup = null;
+
+function renderPlantConfirmModal(){
+  const uid = state.plantSelectedUid;
+  const isFree = uid === 'free-common';
+  const item = isFree ? null : state.pouch.find(s=> String(s.uid) === String(uid));
+  const type = isFree ? SEED_TYPES.common : (item ? SEED_TYPES[item.type] : SEED_TYPES.common);
+  return `
+  <div class="modal-backdrop" id="backdrop">
+    <div class="modal-sheet" style="position:relative; text-align:center;">
+      <div class="close-x" data-action="close-modal">✕</div>
+      <div class="modal-handle"></div>
+      <div class="modal-title">Plant this seed?</div>
+      <div class="modal-sub">Into Pot ${state.plantTarget+1}</div>
+      <div style="display:flex; justify-content:center; margin:10px 0;">
+        <div class="seed-icon-wrap ${type.bg}" style="width:74px;height:74px;border-radius:20px;">${seedIcon(type)}</div>
+      </div>
+      <div class="seed-name" style="font-size:16px;">${type.name}</div>
+      <div class="seed-tag ${type.tag}">${type.rarityLabel}</div>
+      <div class="seed-meta" style="margin-top:6px;">${type.threshold} steps to grow</div>
+      <button class="pill-btn primary" data-action="confirm-plant" style="width:100%; padding:14px; font-size:15px; margin-top:16px;">Plant Here</button>
+    </div>
+  </div>`;
+}
+
+function renderCompostConfirmModal(){
+  const uid = state.compostTargetUid;
+  const item = state.pouch.find(s=> String(s.uid) === String(uid));
+  if(!item) return '';
+  const type = SEED_TYPES[item.type];
+  return `
+  <div class="modal-backdrop" id="backdrop">
+    <div class="modal-sheet" style="position:relative; text-align:center;">
+      <div class="close-x" data-action="close-modal">✕</div>
+      <div class="modal-handle"></div>
+      <div class="modal-title">Compost this seed?</div>
+      <div class="modal-sub">You'll get a small coin payout instead.</div>
+      <div style="display:flex; justify-content:center; margin:10px 0;">
+        <div class="seed-icon-wrap ${type.bg}" style="width:74px;height:74px;border-radius:20px;">${seedIcon(type)}</div>
+      </div>
+      <div class="seed-name" style="font-size:16px;">${type.name}</div>
+      <div class="seed-meta" style="margin-top:4px;">+${type.compost}¢</div>
+      <div style="display:flex; gap:10px; margin-top:16px;">
+        <button class="pill-btn soft" data-action="close-modal" style="flex:1; padding:12px;">Cancel</button>
+        <button class="pill-btn primary" data-action="confirm-compost" style="flex:1; padding:12px;">Compost</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderPotInspectModal(){
+  const idx = state.inspectPotIndex;
+  const p = state.pots[idx];
+  if(!p) return '';
+  const type = SEED_TYPES[p.type];
+  const frac = Math.min(1, p.progress/type.threshold);
+  const ready = frac >= 1;
+  return `
+  <div class="modal-backdrop" id="backdrop">
+    <div class="modal-sheet" style="position:relative; text-align:center;">
+      <div class="speech-tail"></div>
+      <div class="close-x" data-action="close-modal">✕</div>
+      <div class="modal-handle"></div>
+      <div style="display:flex; justify-content:center; margin:6px 0 10px;">
+        <div class="seed-icon-wrap ${type.bg}" style="width:64px;height:64px;border-radius:18px;">${seedIcon(type)}</div>
+      </div>
+      <div class="seed-name" style="font-size:16px;">${type.name}</div>
+      <div class="seed-tag ${type.tag}">${type.rarityLabel}</div>
+      <div class="progress-track" style="margin-top:14px;"><div class="progress-fill" style="width:${frac*100}%"></div></div>
+      <div class="seed-meta" style="margin-top:6px;">${Math.min(p.progress,type.threshold)} / ${type.threshold} steps</div>
+      ${ready
+        ? `<button class="pill-btn primary" data-action="harvest-pot" data-idx="${idx}" style="width:100%; padding:14px; font-size:15px; margin-top:14px;">🌼 Harvest</button>`
+        : `<div class="modal-sub" style="margin-top:10px; margin-bottom:0;">${type.threshold-p.progress} steps to go — keep walking!</div>`}
+    </div>
+  </div>`;
+}
+
+function renderModal(){
+  const root = document.getElementById('modalRoot');
+  if(!state.modal){ root.innerHTML=''; if(tearCleanup){ tearCleanup(); tearCleanup=null; } return; }
+  if(state.modal !== 'tearing' && tearCleanup){ tearCleanup(); tearCleanup=null; }
+
+  if(state.modal === 'plantConfirm'){ root.innerHTML = renderPlantConfirmModal(); return; }
+  if(state.modal === 'compostConfirm'){ root.innerHTML = renderCompostConfirmModal(); return; }
+  if(state.modal === 'potInspect'){ root.innerHTML = renderPotInspectModal(); return; }
+
+  if(state.modal === 'shop'){
+    root.innerHTML = `
+    <div class="modal-backdrop" id="backdrop">
+      <div class="modal-sheet" style="position:relative;">
+        <div class="close-x" data-action="close-modal">✕</div>
+        <div class="modal-handle"></div>
+        <div class="modal-title">🛍️ Seed Shop</div>
+        <div class="modal-sub">Higher tiers cost more but guarantee a better rarity floor.</div>
+        ${SHOP_PACKS.map(pack=>{
+          const oddsText = Object.entries(pack.weights).map(([k,w])=> `${k.charAt(0).toUpperCase()+k.slice(1)} ${w}%`).join(' · ');
+          const v = PACK_VISUALS[pack.id];
+          return `
+          <div class="pack-card">
+            <div class="pack-card-top">
+              <svg width="46" height="46" viewBox="0 0 54 54">
+                <path d="M10 20 L12 48 Q27 52 42 48 L44 20Z" fill="${v.primary}" stroke="${v.secondary}" stroke-width="2" stroke-linejoin="round"/>
+                <path d="M8 14 L46 14 L44 20 L10 20Z" fill="${v.secondary}" stroke="${v.secondary}" stroke-width="2" stroke-linejoin="round"/>
+                <circle cx="27" cy="10" r="6" fill="none" stroke="${v.secondary}" stroke-width="2"/>
+              </svg>
+              <div style="flex:1;"><div class="seed-name">${pack.name}</div><div class="seed-meta">${pack.desc}</div></div>
+            </div>
+            <div class="seed-meta" style="margin-bottom:8px;">${oddsText}</div>
+            <button class="pill-btn gold" data-action="buy-pack" data-pack="${pack.id}" style="width:100%; padding:11px;" ${state.coins < pack.cost ? 'disabled' : ''}>Buy for ${pack.cost}¢</button>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
+  if(state.modal === 'tearing'){
+    const revealType = SEED_TYPES[state.revealSeed];
+    const isLegendary = revealType.tierKey === 'legendary';
+    const v = PACK_VISUALS[state.activePackId] || PACK_VISUALS.sprout;
+    root.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal-sheet" style="position:relative; text-align:center;">
+        <div class="modal-handle"></div>
+        <div class="pack-label-banner" style="background:${v.secondary};">${v.label}</div>
+        <div class="modal-title">Rip it open!</div>
+        <div class="modal-sub">Swipe across the pack to tear it</div>
+        <div class="tear-stage" id="tearStage">
+          <svg class="packet-half left" id="packLeft" width="70" height="70" viewBox="0 0 60 60"><path d="M8 8 L52 8 L48 34 L4 40 Z" fill="${v.primary}" stroke="${v.secondary}" stroke-width="2" stroke-linejoin="round"/></svg>
+          <svg class="packet-half right" id="packRight" width="70" height="70" viewBox="0 0 60 60"><path d="M4 40 L48 34 L52 56 L10 56 Z" fill="${v.primary}" stroke="${v.secondary}" stroke-width="2" stroke-linejoin="round" opacity="0.9"/></svg>
+          ${isLegendary ? `<div class="glint-sweep"></div>` : ''}
+          <div class="swipe-hint" id="swipeHint">
+            <svg width="50" height="20" viewBox="0 0 50 20"><path d="M2 10H38" stroke="#8A7660" stroke-width="2" stroke-dasharray="3 4" stroke-linecap="round"/><path d="M32 4L40 10L32 16" stroke="#8A7660" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="animation: arrowPulse 1.2s ease-in-out infinite;"/></svg>
+          </div>
+        </div>
+      </div>
+    </div>`;
+    setupTearInteraction();
+    return;
+  }
+
+  if(state.modal === 'burst'){
+    const type = SEED_TYPES[state.revealSeed];
+    root.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal-sheet" style="position:relative; text-align:center;">
+        <div class="modal-handle"></div>
+        <div class="modal-title">✨ Something's emerging...</div>
+        <div class="tear-stage">
+          <div class="core-flash" style="background:${type.petal};"></div>
+          <div class="glow-ring" style="border-color:${type.petal};"></div>
+          <div class="glow-ring" style="border-color:${type.center}; animation-delay:0.18s;"></div>
+          <div class="glow-ring" style="border-color:${type.petal}; animation-delay:0.36s;"></div>
+          <svg width="34" height="34" viewBox="0 0 30 30" style="position:absolute; animation: pop 0.5s ease;"><ellipse cx="15" cy="19" rx="9" ry="5" fill="#5C4028" opacity="0.4"/><path d="M15 20C15 20 6 16 8 8C8 8 16 8 15 20Z" fill="${type.petal}" stroke="${type.center}" stroke-width="1"/><path d="M15 20C15 20 24 16 22 8C22 8 14 8 15 20Z" fill="${type.petal}" stroke="${type.center}" stroke-width="1" opacity="0.85"/></svg>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  if(state.modal === 'reveal'){
+    const type = SEED_TYPES[state.revealSeed];
+    root.innerHTML = `
+    <div class="modal-backdrop" id="backdrop">
+      <div class="modal-sheet" style="position:relative; text-align:center;">
+        <div class="modal-handle"></div>
+        <div class="modal-title">You found a seed!</div>
+        <div style="display:flex; justify-content:center; margin:14px 0; position:relative;">
+          <div style="position:absolute; width:110px; height:110px; border-radius:50%; background:${type.petal}; opacity:0.25; filter:blur(6px);"></div>
+          <div id="revealSeedIcon" class="seed-icon-wrap ${type.bg}" style="position:relative; width:84px;height:84px;border-radius:22px; animation: pop 0.4s ease; box-shadow:0 0 30px ${type.petal};">
+            <svg width="50" height="50" viewBox="0 0 30 30"><ellipse cx="15" cy="19" rx="9" ry="5" fill="#5C4028" opacity="0.5"/><path d="M15 20C15 20 6 16 8 8C8 8 16 8 15 20Z" fill="${type.petal}" stroke="${type.center}" stroke-width="1"/><path d="M15 20C15 20 24 16 22 8C22 8 14 8 15 20Z" fill="${type.petal}" stroke="${type.center}" stroke-width="1" opacity="0.85"/></svg>
+          </div>
+        </div>
+        <div class="seed-name" style="font-size:17px;">${type.name}</div>
+        <div class="seed-tag ${type.tag}">${type.rarityLabel}</div>
+        <button class="pill-btn primary" data-action="collect-seed" style="width:100%; padding:14px; font-size:15px; margin-top:18px;">Add to Pouch</button>
+      </div>
+    </div>`;
+  }
+
+  if(state.modal === 'newSpecies'){
+    const type = SEED_TYPES[state.celebrateSpecies];
+    root.innerHTML = `
+    <div class="modal-backdrop" id="backdrop">
+      <div class="modal-sheet" style="position:relative; text-align:center; overflow:hidden;">
+        <div class="confetti-layer">${confettiDots()}</div>
+        <div class="modal-handle"></div>
+        <div class="modal-title" style="font-size:21px;">🎉 New Species Discovered!</div>
+        <div style="display:flex; justify-content:center; margin:14px 0; position:relative;">
+          <div style="position:absolute; width:120px;height:120px;border-radius:50%; background:${type.petal}; opacity:0.3; filter:blur(8px);"></div>
+          <div class="seed-icon-wrap ${type.bg}" style="position:relative; width:90px;height:90px;border-radius:24px; animation: pop 0.5s ease; box-shadow:0 0 36px ${type.petal};">${seedIcon(type)}</div>
+        </div>
+        <div class="seed-name" style="font-size:18px;">${type.name}</div>
+        <div class="seed-tag ${type.tag}">${type.rarityLabel}</div>
+        <div class="modal-sub" style="margin-top:14px; font-style:italic;">"${type.fact}"</div>
+        <button class="pill-btn primary" data-action="close-chain" style="width:100%; padding:14px; font-size:15px; margin-top:8px;">Add to Flora-Dex</button>
+      </div>
+    </div>`;
+  }
+
+  if(state.modal === 'streakReward'){
+    const r = state.lastReward || {coins:0, seedKey:null, cycle:1};
+    const seedType = r.seedKey ? SEED_TYPES[r.seedKey] : null;
+    root.innerHTML = `
+    <div class="modal-backdrop" id="backdrop">
+      <div class="modal-sheet" style="position:relative; text-align:center;">
+        <div class="modal-handle"></div>
+        <div class="modal-title">🔥 Day ${state.streak.count} Streak!</div>
+        <div class="modal-sub">Thanks for tending your garden today.</div>
+        <div class="stat-row-item" style="margin-bottom:10px;"><div class="label">🪙 Coins earned</div><div class="value">+${r.coins}¢</div></div>
+        ${seedType ? `<div class="seed-card"><div class="seed-icon-wrap ${seedType.bg}">${seedIcon(seedType)}</div><div class="seed-info"><div class="seed-name">${seedType.name}</div><div class="seed-tag ${seedType.tag}">${seedType.rarityLabel}</div></div></div>` : ''}
+        <button class="pill-btn primary" data-action="close-chain" style="width:100%; padding:14px; font-size:15px; margin-top:10px;">Nice!</button>
+      </div>
+    </div>`;
+  }
+
+  if(state.modal === 'settings'){
+    root.innerHTML = `
+    <div class="modal-backdrop" id="backdrop">
+      <div class="modal-sheet" style="position:relative;">
+        <div class="close-x" data-action="close-modal">✕</div>
+        <div class="modal-handle"></div>
+        <div class="modal-title">⚙️ Settings</div>
+        <div class="modal-sub">Keep things calm and cozy.</div>
+        <div class="stat-row-item" style="margin-bottom:10px;">
+          <div class="label">🎵 Background Music</div>
+          <button class="pill-btn ${state.settings.music?'primary':'soft'}" data-action="toggle-music">${state.settings.music?'On':'Off'}</button>
+        </div>
+        <div class="stat-row-item">
+          <div class="label">🔔 Sound Effects</div>
+          <button class="pill-btn ${state.settings.sfx?'primary':'soft'}" data-action="toggle-sfx">${state.settings.sfx?'On':'Off'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  if(state.modal === 'profile'){
+    const discovered = DEX_ORDER.filter(k=> state.discovered[k]).length;
+    const nextLevelSteps = stepsForNextLevel(state.level);
+    root.innerHTML = `
+    <div class="modal-backdrop" id="backdrop">
+      <div class="modal-sheet" style="position:relative;">
+        <div class="close-x" data-action="close-modal">✕</div>
+        <div class="modal-handle"></div>
+        <div class="profile-avatar"><svg width="38" height="38" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" fill="#fff"/><path d="M4 20C4 15 8 13 12 13C16 13 20 15 20 20" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></div>
+        <div class="modal-title" style="text-align:center;">Gardener Profile</div>
+        <div class="modal-sub" style="text-align:center;">Your journey with Flora so far.</div>
+        <div class="stat-list">
+          <div class="stat-row-item"><div class="label">🌟 Level</div><div class="value">${state.level} (${fmt(state.totalSteps)} / ${fmt(nextLevelSteps)} steps)</div></div>
+          <div class="stat-row-item"><div class="label">👣 Total Steps Walked</div><div class="value">${fmt(state.totalSteps)}</div></div>
+          <div class="stat-row-item"><div class="label">🌼 Plants Harvested</div><div class="value">${fmt(state.totalHarvested)}</div></div>
+          <div class="stat-row-item"><div class="label">🪙 Total Coins Earned</div><div class="value">${fmt(state.totalCoinsEarned)}</div></div>
+          <div class="stat-row-item"><div class="label">📖 Flora-Dex Progress</div><div class="value">${discovered}/${DEX_ORDER.length}</div></div>
+          <div class="stat-row-item"><div class="label">🔥 Daily Streak</div><div class="value">${state.streak ? state.streak.count : 0} days</div></div>
+        </div>
+      </div>
+    </div>`;
+  }
+}
+
+function confettiDots(){
+  const colors=['#E3AC3D','#DE8D95','#9C82C4','#4FA0A8','#8CAE7D'];
+  let out='';
+  for(let i=0;i<14;i++){
+    const left = (i*7)%100;
+    const color = colors[i%colors.length];
+    const delay = (i%6)*0.12;
+    out += `<div style="position:absolute; top:-10px; left:${left}%; width:6px; height:6px; background:${color}; border-radius:2px; animation: confettiFall 1.4s ease-in forwards; animation-delay:${delay}s;"></div>`;
+  }
+  return out;
+}
+
+/* ===================== SWIPE-TO-TEAR ===================== */
+function setupTearInteraction(){
+  if(tearCleanup){ tearCleanup(); tearCleanup = null; }
+  const stage = document.getElementById('tearStage');
+  const leftHalf = document.getElementById('packLeft');
+  const rightHalf = document.getElementById('packRight');
+  const hint = document.getElementById('swipeHint');
+  if(!stage) return;
+  let startX = null, dragging = false, done = false;
+  const threshold = 65;
+  function onDown(e){
+    dragging = true; done = false;
+    startX = (e.touches ? e.touches[0].clientX : e.clientX);
+    if(hint) hint.style.opacity = '0';
+  }
+  function onMove(e){
+    if(!dragging || done) return;
+    const x = (e.touches ? e.touches[0].clientX : e.clientX);
+    const dx = x - startX;
+    const progress = Math.max(0, Math.min(1, Math.abs(dx)/threshold));
+    if(leftHalf) leftHalf.style.transform = `translate(${-dx*0.4}px, ${progress*4}px) rotate(${-progress*16}deg)`;
+    if(rightHalf) rightHalf.style.transform = `translate(${dx*0.4}px, ${-progress*4}px) rotate(${progress*16}deg)`;
+    if(progress >= 1){ done = true; completeTear(leftHalf, rightHalf); }
+  }
+  function onUp(){
+    dragging = false;
+    if(!done){
+      if(leftHalf) leftHalf.style.transform = '';
+      if(rightHalf) rightHalf.style.transform = '';
+      if(hint) hint.style.opacity = '1';
+    }
+  }
+  stage.addEventListener('pointerdown', onDown);
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  tearCleanup = ()=>{
+    stage.removeEventListener('pointerdown', onDown);
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+  };
+}
+function completeTear(leftHalf, rightHalf){
+  if(leftHalf) leftHalf.style.transform = 'translate(-70px, 10px) rotate(-28deg)';
+  if(rightHalf) rightHalf.style.transform = 'translate(70px, -12px) rotate(26deg)';
+  playSfx('pack');
+  if(tearCleanup){ tearCleanup(); tearCleanup = null; }
+  setTimeout(()=>{
+    state.modal = 'burst';
+    render();
+    setTimeout(()=>{ state.modal = 'reveal'; render(); }, 550);
+  }, 220);
+}
+
+/* ===================== ACTIONS ===================== */
+function simulateSteps(){
+  state.totalSteps += 500;
+  const growthUpdates = [];
+  state.pots = state.pots.map((p,i)=>{
+    if(!p) return p;
+    const type = SEED_TYPES[p.type];
+    const newProgress = Math.min(type.threshold, p.progress + 500);
+    if(newProgress > p.progress) growthUpdates.push({index:i, from:p.progress, to:newProgress, threshold:type.threshold});
+    return {...p, progress:newProgress};
+  });
+  const leveled = checkLevelUp();
+  if(state.tab === 'garden' && !state.modal){
+    growthUpdates.forEach(u=> animatePotGrowth(u.index, u.from, u.to));
+  } else {
+    render();
+  }
+  if(!leveled){
+    const anyReady = growthUpdates.some(u=> u.to >= u.threshold && u.from < u.threshold);
+    if(anyReady) toast('🌼 A plant is ready to harvest!');
+    else if(growthUpdates.length) toast('+500 steps — your garden is growing!');
+    else toast('+500 steps logged');
+  }
+}
+
+function openPlantModal(index, uid){
+  state.plantTarget = index;
+  state.plantSelectedUid = uid || (state.pouch[0] ? String(state.pouch[0].uid) : 'free-common');
+  state.modal = 'plantConfirm';
+  render();
+}
+function openPotInspect(index){
+  state.inspectPotIndex = index;
+  state.modal = 'potInspect';
+  render();
+}
+
+function plantSeed(uid){
+  if(uid === 'free-common'){
+    state.pots[state.plantTarget] = {uid:'free-common', type:'common', progress:0};
+    state.modal = null;
+    playSfx('plant');
+    toast(`Planted ${SEED_TYPES.common.name}!`);
+    render();
+    return;
+  }
+  const idx = state.pouch.findIndex(s=> String(s.uid) === String(uid));
+  if(idx === -1) return;
+  const item = state.pouch[idx];
+  state.pots[state.plantTarget] = {uid: item.uid, type: item.type, progress:0};
+  state.pouch.splice(idx,1);
+  state.modal = null;
+  playSfx('plant');
+  toast(`Planted ${SEED_TYPES[item.type].name}!`);
+  render();
+}
+
+function harvestPot(index){
+  const p = state.pots[index];
+  if(!p) return;
+  const type = SEED_TYPES[p.type];
+  if(p.progress < type.threshold) return;
+  state.coins += type.harvest;
+  state.totalCoinsEarned += type.harvest;
+  state.totalHarvested += 1;
+  state.dex[p.type] = (state.dex[p.type] || 0) + 1;
+  state.pots[index] = null;
+  playSfx('harvest');
+  toast(`Harvested! +${type.harvest}¢`);
+}
+
+function requestCompost(uid){
+  state.compostTargetUid = uid;
+  state.modal = 'compostConfirm';
+  render();
+}
+function confirmCompostAnimated(){
+  const uid = state.compostTargetUid;
+  state.modal = null;
+  render();
+  requestAnimationFrame(()=> animateCompostFly(uid));
+}
+function animateCompostFly(uid){
+  const item = state.pouch.find(s=> String(s.uid) === String(uid));
+  if(!item) return;
+  const type = SEED_TYPES[item.type];
+  const sourceEl = document.querySelector(`.seed-card[data-seed-uid="${uid}"] .seed-icon-wrap`);
+  const target = document.getElementById('composterCorner');
+  const phoneEl = document.getElementById('phone');
+  if(sourceEl && target && phoneEl){
+    const startRect = sourceEl.getBoundingClientRect();
+    const endRect = target.getBoundingClientRect();
+    const phoneRect = phoneEl.getBoundingClientRect();
+    const flyEl = sourceEl.cloneNode(true);
+    flyEl.style.position='absolute';
+    flyEl.style.left=(startRect.left-phoneRect.left)+'px';
+    flyEl.style.top=(startRect.top-phoneRect.top)+'px';
+    flyEl.style.width=startRect.width+'px';
+    flyEl.style.height=startRect.height+'px';
+    flyEl.style.margin='0'; flyEl.style.zIndex='80';
+    flyEl.style.transition='transform 0.55s cubic-bezier(.4,0,.2,1), opacity 0.55s ease';
+    flyEl.style.pointerEvents='none';
+    phoneEl.appendChild(flyEl);
+    requestAnimationFrame(()=>{
+      const dx=(endRect.left+endRect.width/2)-(startRect.left+startRect.width/2);
+      const dy=(endRect.top+endRect.height/2)-(startRect.top+startRect.height/2);
+      flyEl.style.transform=`translate(${dx}px, ${dy}px) scale(0.2)`;
+      flyEl.style.opacity='0.15';
+    });
+    setTimeout(()=>{ flyEl.remove(); finalizeCompost(uid, type); }, 580);
+  } else {
+    finalizeCompost(uid, type);
+  }
+}
+function finalizeCompost(uid, type){
+  const idx = state.pouch.findIndex(s=> String(s.uid) === String(uid));
+  if(idx !== -1) state.pouch.splice(idx,1);
+  state.coins += type.compost;
+  state.totalCoinsEarned += type.compost;
+  playSfx('coin');
+  toast(`Composted for +${type.compost}¢`);
+  render();
+  const bumpEl = document.getElementById('composterCorner');
+  if(bumpEl){ bumpEl.classList.add('bump'); setTimeout(()=> bumpEl.classList.remove('bump'), 500); }
+}
+
+function buyPacket(packId){
+  const pack = SHOP_PACKS.find(p=> p.id === packId);
+  if(!pack || state.coins < pack.cost) return;
+  state.coins -= pack.cost;
+  state.isLevelPackFlow = false;
+  state.activePackId = packId;
+  state.revealSeed = rollPack(pack);
+  state.modal = 'tearing';
+  render();
+}
+
+function collectRevealedSeed(){
+  const iconEl = document.getElementById('revealSeedIcon');
+  const pouchNav = document.querySelector('.nav-btn[data-tab="pouch"]');
+  const phoneEl = document.getElementById('phone');
+  const seedKey = state.revealSeed;
+
+  function finish(){
+    state.pouch.push({uid: seedUid++, type: seedKey});
+    const isNew = checkDiscovery(seedKey);
+    if(isNew){
+      state.modal = 'newSpecies';
+      state.celebrateSpecies = seedKey;
+      render();
+      return;
+    }
+    if(state.isLevelPackFlow && state.pendingLevelPacks.length > 0){
+      openNextLevelPack();
+      return;
+    }
+    state.isLevelPackFlow = false;
+    toast('Seed added to your pouch! 🌱');
+    render();
+  }
+
+  if(iconEl && pouchNav && phoneEl){
+    const startRect = iconEl.getBoundingClientRect();
+    const endRect = pouchNav.getBoundingClientRect();
+    const phoneRect = phoneEl.getBoundingClientRect();
+    const flyEl = iconEl.cloneNode(true);
+    flyEl.removeAttribute('id');
+    flyEl.style.position = 'absolute';
+    flyEl.style.left = (startRect.left - phoneRect.left) + 'px';
+    flyEl.style.top = (startRect.top - phoneRect.top) + 'px';
+    flyEl.style.width = startRect.width + 'px';
+    flyEl.style.height = startRect.height + 'px';
+    flyEl.style.margin = '0';
+    flyEl.style.zIndex = '80';
+    flyEl.style.transition = 'transform 0.6s cubic-bezier(.4,0,.2,1), opacity 0.6s ease';
+    flyEl.style.pointerEvents = 'none';
+    phoneEl.appendChild(flyEl);
+
+    state.modal = null;
+    render();
+
+    requestAnimationFrame(()=>{
+      const dx = (endRect.left + endRect.width/2) - (startRect.left + startRect.width/2);
+      const dy = (endRect.top + endRect.height/2) - (startRect.top + startRect.height/2);
+      flyEl.style.transform = `translate(${dx}px, ${dy}px) scale(0.15)`;
+      flyEl.style.opacity = '0.2';
+    });
+    setTimeout(()=>{
+      flyEl.remove();
+      pulseNav('pouch');
+      finish();
+    }, 620);
+  } else {
+    finish();
+  }
+}
+
+/* ===================== EVENT DELEGATION ===================== */
+function handleClick(e){
+  try{
+    const el = e.target;
+    const actionEl = el.closest('[data-action]');
+    if(actionEl){
+      const action = actionEl.dataset.action;
+      if(action === 'simulate'){ simulateSteps(); return; }
+      if(action === 'open-shop'){ state.modal = 'shop'; render(); return; }
+      if(action === 'buy-pack'){ buyPacket(actionEl.dataset.pack); return; }
+      if(action === 'collect-seed'){ collectRevealedSeed(); return; }
+      if(action === 'close-modal'){ state.modal = null; render(); return; }
+      if(action === 'close-chain'){ closeChainedModal(); return; }
+      if(action === 'open-profile'){ state.modal = 'profile'; render(); return; }
+      if(action === 'open-settings'){ state.modal = 'settings'; render(); return; }
+      if(action === 'toggle-music'){ toggleMusic(); return; }
+      if(action === 'toggle-sfx'){ toggleSfx(); return; }
+      if(action === 'claim-streak'){ claimDailyReward(); return; }
+      if(action === 'harvest-pot'){ harvestPot(parseInt(actionEl.dataset.idx)); state.modal = null; render(); return; }
+      if(action === 'plant-request'){
+        const emptyIdx = state.pots.findIndex(p=>!p);
+        if(emptyIdx === -1){ toast('All pots are full!'); return; }
+        openPlantModal(emptyIdx, actionEl.dataset.uid);
+        return;
+      }
+      if(action === 'confirm-plant'){ plantSeed(state.plantSelectedUid); return; }
+      if(action === 'compost'){ requestCompost(actionEl.dataset.uid); return; }
+      if(action === 'confirm-compost'){ confirmCompostAnimated(); return; }
+      if(action === 'enable-location'){ requestLocation(); return; }
+      if(action === 'enable-compass'){ requestCompass(); return; }
+      if(action === 'enable-notifications'){ requestNotifications(); return; }
+    }
+
+    const backdrop = el.closest('.modal-backdrop');
+    if(backdrop && el === backdrop && backdrop.id === 'backdrop'){ state.modal = null; render(); return; }
+
+    const potSlot = el.closest('.pot-slot');
+    if(potSlot){
+      const idx = parseInt(potSlot.dataset.pot);
+      const p = state.pots[idx];
+      if(!p) openPlantModal(idx);
+      else openPotInspect(idx);
+      return;
+    }
+
+    const navBtn = el.closest('.nav-btn');
+    if(navBtn){
+      if(navBtn.dataset.tab === 'dex') state.dexHasUnseenDiscovery = false;
+      state.tab = navBtn.dataset.tab;
+      render();
+      return;
+    }
+  }catch(err){
+    console.error('Flora click handler error:', err);
+    toast('Oops, that hiccuped — try again');
+  }
+}
+document.getElementById('phone').addEventListener('click', handleClick);
+
+render();
+initStreak();
+loadMapPersistence();
+setInterval(cycleWeather, 14000);
+mapWorldTimer = setInterval(mapWorldTick, MAP_TICK_MS);
+// Reconcile against Date.now() whenever the app regains focus/visibility — handles the device
+// sleeping, the tab being backgrounded, or the clock otherwise drifting while we were away.
+window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') mapWorldTick(); });
+window.addEventListener('focus', mapWorldTick);
+window.addEventListener('resize', ()=>{ if(leafletMapInstance) updateRadarArrows(); });
+</script>
+</body>
+</html>
