@@ -195,15 +195,16 @@
     position:relative; flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
     background:none; border:none; cursor:pointer; color:var(--ink-soft); padding:6px 0; min-height:46px;
     font-family:'Nunito',sans-serif; font-weight:800; font-size:10px; pointer-events:auto;
+    -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; touch-action:manipulation; outline:none;
   }
   .nav-btn.active{ color:var(--moss-dark); }
   .nav-btn.pulse{ animation: navPulse 0.6s ease; }
-  .nav-btn svg{ width:21px; height:21px; }
-  .nav-btn .dot{ width:5px;height:5px;border-radius:50%; background:var(--gold); margin-top:-1px; opacity:0; }
+  .nav-btn svg{ width:21px; height:21px; pointer-events:none; }
+  .nav-btn .dot{ width:5px;height:5px;border-radius:50%; background:var(--gold); margin-top:-1px; opacity:0; pointer-events:none; }
   .nav-btn.active .dot{opacity:1;}
   .nav-badge{
     display:none; position:absolute; top:2px; right:22%; width:9px; height:9px; border-radius:50%;
-    background:#e05555; border:2px solid var(--paper); animation: badgePulse 1s ease-in-out infinite;
+    background:#e05555; border:2px solid var(--paper); animation: badgePulse 1s ease-in-out infinite; pointer-events:none;
   }
 
   .modal-backdrop{
@@ -821,7 +822,29 @@ function boundsForRadius(center, radiusM){
 // Returns only verified, currently-active nodes; anything disused/closed/unverifiable is
 // discarded rather than shown as a real place. If the fetch itself fails, returns null (see
 // loadNearbyPOIs) — no fabricated placeholder POIs are ever substituted in its place.
+// Lightweight in-memory grid-bucket cache for Overpass results: repeated queries within the same
+// immediate neighborhood (e.g. the player wandering back and forth near a boundary) are served
+// from here instead of re-hitting the public API, which helps avoid 429 rate-limit responses.
+const OVERPASS_CACHE_TTL_MS = 10*60*1000; // 10 min — long enough to absorb repeat queries, short enough to stay fresh
+const OVERPASS_CACHE_GRID_M = 250;        // grid-bucket size
+const overpassCache = {}; // gridKey -> { timestamp, pois, zones }
+function overpassGridKey(center){
+  const latStep = OVERPASS_CACHE_GRID_M / 111320;
+  const cosLat = Math.max(Math.cos(center.lat*Math.PI/180), 0.01);
+  const lonStep = OVERPASS_CACHE_GRID_M / (111320*cosLat);
+  return Math.round(center.lat/latStep) + ',' + Math.round(center.lon/lonStep);
+}
+function getOverpassCache(center){
+  const entry = overpassCache[overpassGridKey(center)];
+  return entry && (Date.now()-entry.timestamp) < OVERPASS_CACHE_TTL_MS ? entry : null;
+}
+function setOverpassCache(center, patch){
+  const key = overpassGridKey(center);
+  overpassCache[key] = { ...(overpassCache[key]||{}), ...patch, timestamp: Date.now() };
+}
 async function fetchOSMPOIs(center){
+  const cached = getOverpassCache(center);
+  if(cached && cached.pois) return cached.pois;
   const query = `[out:json][timeout:12];(`
     + `node["amenity"~"^(cafe|restaurant|fast_food|bar|pub)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
     + `node["leisure"="park"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
@@ -853,6 +876,7 @@ async function fetchOSMPOIs(center){
       const genericLabel = type==='cafe' ? 'Cozy Café' : type==='park' ? 'Local Park' : type==='restaurant' ? 'Local Eatery' : 'Nearby Building';
       return { type, icon, label: tags.name || genericLabel, lat, lon };
     }).filter(Boolean);
+    setOverpassCache(center, { pois });
     return pois;
   }catch(e){
     clearTimeout(timer);
@@ -871,6 +895,8 @@ async function loadNearbyPOIs(center){
 // shown to the player or used for spawn *placement* — it is purely an exclusion list checked by
 // isSafeSpawnPoint() before any seed is allowed to appear.
 async function fetchSafetyZones(center){
+  const cached = getOverpassCache(center);
+  if(cached && cached.zones) return cached.zones;
   const query = `[out:json][timeout:12];(`
     + `node["amenity"~"^(school|hospital|kindergarten|clinic|college|university)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
     + `way["amenity"~"^(school|hospital|kindergarten|clinic|college|university)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
@@ -884,12 +910,14 @@ async function fetchSafetyZones(center){
     clearTimeout(timer);
     if(!res.ok) throw new Error('Overpass HTTP '+res.status);
     const data = await res.json();
-    return (data.elements || []).map(el=>{
+    const zones = (data.elements || []).map(el=>{
       const lat = el.lat ?? (el.center && el.center.lat);
       const lon = el.lon ?? (el.center && el.center.lon);
       if(lat == null || lon == null) return null;
       return { lat, lon };
     }).filter(Boolean);
+    setOverpassCache(center, { zones });
+    return zones;
   }catch(e){
     clearTimeout(timer);
     // Fail closed toward "keep trying spawns" rather than blocking the game, but note it clearly —
@@ -943,7 +971,7 @@ async function maybeRefreshPOIs(center){
     state.mapPOIs = pois;
     safetyZones = zones;
     lastPOIFetchCenter = center;
-    poiMarkers.forEach(m=> leafletMapInstance.removeLayer(m));
+    poiMarkers.forEach(m=>{ try{ m.remove(); }catch(e){ console.error('Flora POI marker cleanup error:', e); } });
     poiMarkers = state.mapPOIs.map(poi=>{
       const icon = L.divIcon({ className:'', html:`<div class="map-poi-icon poi-${poi.type}"><span>${poi.icon}</span></div>`, iconSize:[30,30] });
       const m = L.marker([poi.lat, poi.lon], {icon}).addTo(leafletMapInstance);
@@ -1042,6 +1070,7 @@ let state = {
   nextSpecialSpawnAt: null,
   ambientTargetCount: null,
   mapPOIs: [],
+  walkActive: false, // true while a walk session (wake lock + accelerometer step counting) is running
   notifPermission: (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported'
 };
 state.discovered['common'] = true;
@@ -1055,23 +1084,32 @@ function ensureAudio(){
   if(!audioCtx){
     try{ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ audioCtx = null; }
   }
+  // AudioContext state guard: browsers often suspend the context (autoplay policy, tab
+  // backgrounding); attempt a resume so playback doesn't silently fail or throw once the app
+  // comes back to the foreground.
+  if(audioCtx && audioCtx.state === 'suspended'){
+    try{ audioCtx.resume(); }catch(e){ /* will retry resume on the next call */ }
+  }
   return audioCtx;
 }
 function playTone(freq, startTime, peakGain, totalDur, waveType){
-  const ctx = ensureAudio(); if(!ctx) return;
-  const osc = ctx.createOscillator();
-  osc.type = waveType; osc.frequency.value = freq;
-  const filter = ctx.createBiquadFilter();
-  filter.type = 'lowpass'; filter.frequency.value = 1800;
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.0001, startTime);
-  gain.gain.linearRampToValueAtTime(peakGain, startTime + totalDur*0.28);
-  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + totalDur);
-  osc.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
-  osc.start(startTime); osc.stop(startTime + totalDur + 0.1);
+  const ctx = ensureAudio();
+  if(!ctx || ctx.state !== 'running') return; // never schedule notes on a non-running context
+  try{
+    const osc = ctx.createOscillator();
+    osc.type = waveType; osc.frequency.value = freq;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass'; filter.frequency.value = 1800;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.linearRampToValueAtTime(peakGain, startTime + totalDur*0.28);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + totalDur);
+    osc.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+    osc.start(startTime); osc.stop(startTime + totalDur + 0.1);
+  }catch(e){ console.error('Flora tone error:', e); }
 }
 function playAmbientNote(){
-  const ctx = ensureAudio(); if(!ctx) return;
+  const ctx = ensureAudio(); if(!ctx || ctx.state !== 'running') return;
   try{
     const now = ctx.currentTime;
     const freq = AMBIENT_SCALE[Math.floor(Math.random()*AMBIENT_SCALE.length)];
@@ -1088,7 +1126,7 @@ function startMusic(){ if(musicTimer) return; scheduleNextNote(); }
 function stopMusic(){ if(musicTimer){ clearTimeout(musicTimer); musicTimer = null; } }
 function playSfx(type){
   if(!state.settings.sfx) return;
-  const ctx = ensureAudio(); if(!ctx) return;
+  const ctx = ensureAudio(); if(!ctx || ctx.state !== 'running') return;
   try{
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
@@ -1108,6 +1146,92 @@ function playSfx(type){
 }
 function toggleMusic(){ state.settings.music = !state.settings.music; if(state.settings.music) startMusic(); else stopMusic(); render(); }
 function toggleSfx(){ state.settings.sfx = !state.settings.sfx; render(); }
+
+/* ===================== WALK SESSION: Wake Lock + accelerometer step counter ===================== */
+let wakeLockSentinel = null;
+async function requestWakeLock(){
+  try{
+    if('wakeLock' in navigator){
+      wakeLockSentinel = await navigator.wakeLock.request('screen');
+      wakeLockSentinel.addEventListener('release', ()=>{ wakeLockSentinel = null; });
+    }
+  }catch(e){ console.error('Flora wake lock error:', e); wakeLockSentinel = null; }
+}
+async function releaseWakeLock(){
+  try{ if(wakeLockSentinel){ await wakeLockSentinel.release(); wakeLockSentinel = null; } }
+  catch(e){ console.error('Flora wake lock release error:', e); }
+}
+
+// Basic peak-detection step algorithm: watches the magnitude of accelerationIncludingGravity for
+// spikes above STEP_ACCEL_THRESHOLD, with a short cooldown between counted steps so a single
+// footstep's shake/wobble isn't counted multiple times and erratic sensor noise doesn't spam steps.
+const STEP_ACCEL_THRESHOLD = 11.5; // m/s^2 — resting gravity is ~9.8; a walking footfall spikes above this
+const STEP_COOLDOWN_MS = 300;      // minimum time between two counted steps
+let lastStepAt = 0;
+let pendingRealSteps = 0;
+let realStepFlushTimer = null;
+function flushRealSteps(){
+  realStepFlushTimer = null;
+  if(pendingRealSteps <= 0) return;
+  const n = pendingRealSteps;
+  pendingRealSteps = 0;
+  const { growthUpdates, leveled } = addSteps(n);
+  if(!leveled){
+    const anyReady = growthUpdates.some(u=> u.to >= u.threshold && u.from < u.threshold);
+    if(anyReady) toast('🌼 A plant is ready to harvest!');
+  }
+}
+function registerRealStep(){
+  pendingRealSteps++;
+  if(!realStepFlushTimer) realStepFlushTimer = setTimeout(flushRealSteps, 2000);
+}
+function handleDeviceMotion(e){
+  try{
+    const acc = e.accelerationIncludingGravity || e.acceleration;
+    if(!acc || acc.x == null) return;
+    const magnitude = Math.sqrt((acc.x||0)**2 + (acc.y||0)**2 + (acc.z||0)**2);
+    const now = Date.now();
+    if(magnitude > STEP_ACCEL_THRESHOLD && (now - lastStepAt) > STEP_COOLDOWN_MS){
+      lastStepAt = now;
+      registerRealStep();
+    }
+  }catch(e){ console.error('Flora step-detection error:', e); }
+}
+let motionActive = false;
+function startMotionTracking(){
+  if(motionActive || typeof DeviceMotionEvent === 'undefined') return;
+  window.addEventListener('devicemotion', handleDeviceMotion, true);
+  motionActive = true;
+}
+function stopMotionTracking(){
+  if(motionActive) window.removeEventListener('devicemotion', handleDeviceMotion, true);
+  motionActive = false;
+  if(realStepFlushTimer){ clearTimeout(realStepFlushTimer); realStepFlushTimer = null; }
+  flushRealSteps(); // apply anything accumulated before the session ended, rather than losing it
+}
+// Triggered by the "Start Walk" button tap — the DeviceMotionEvent.requestPermission() call
+// (iOS 13+ Safari) must happen synchronously inside a user gesture, which this satisfies.
+async function toggleWalkSession(){
+  if(state.walkActive){
+    state.walkActive = false;
+    stopMotionTracking();
+    await releaseWakeLock();
+    render();
+    toast('🚶 Walk session ended.');
+    return;
+  }
+  try{
+    if(typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
+      const perm = await DeviceMotionEvent.requestPermission();
+      if(perm !== 'granted'){ toast('Motion permission was not granted — step counting needs it to work.'); return; }
+    }
+  }catch(e){ console.error('Flora motion permission error:', e); toast('Could not enable step tracking on this device.'); return; }
+  state.walkActive = true;
+  startMotionTracking();
+  await requestWakeLock();
+  render();
+  toast('🚶 Walk session started — keep your phone with you!');
+}
 
 /* ===================== HELPERS ===================== */
 function fmt(n){ return n.toLocaleString(); }
@@ -1854,6 +1978,8 @@ function destroyLeafletMap(){
     // of which tab is active — clearing it here was the bug that froze location tracking every
     // time the player navigated away from the map.
     if(leafletMapInstance){ leafletMapInstance.remove(); leafletMapInstance = null; }
+    Object.values(spawnMarkers).forEach(m=>{ try{ m.remove(); }catch(e){ /* map already torn down, nothing to clean up */ } });
+    poiMarkers.forEach(m=>{ try{ m.remove(); }catch(e){ /* map already torn down, nothing to clean up */ } });
     playerMarker = null; spawnMarkers = {}; poiMarkers = [];
     Object.values(radarMeterAnim).forEach(anim=>{ if(anim.timer) clearTimeout(anim.timer); });
     radarArrowEls = {};
@@ -1882,7 +2008,9 @@ function addSpawnMarker(spawn){
   spawnMarkers[spawn.uid] = m;
 }
 function removeSpawnMarker(uid){
-  if(leafletMapInstance && spawnMarkers[uid]) leafletMapInstance.removeLayer(spawnMarkers[uid]);
+  if(spawnMarkers[uid]){
+    try{ spawnMarkers[uid].remove(); }catch(e){ console.error('Flora marker cleanup error:', e); }
+  }
   delete spawnMarkers[uid];
 }
 function syncSpawnMarkers(){
@@ -2175,13 +2303,14 @@ function renderMap(){
   const locBtn = state.mapLocation.status !== 'granted' ? `<button class="pill-btn primary" data-action="enable-location">Enable Location</button>` : '';
   const compassSupported = typeof DeviceOrientationEvent !== 'undefined';
   const compassBtn = (compassSupported && !compassEnabled) ? `<button class="pill-btn soft" data-action="enable-compass">🧭 Enable Compass</button>` : '';
+  const walkBtn = `<button class="pill-btn ${state.walkActive ? 'gold' : 'soft'}" data-action="toggle-walk">${state.walkActive ? '⏹️ Stop Walk' : '🚶 Start Walk'}</button>`;
   return `
     <div class="screen-title">Trail Map</div>
     <div class="screen-sub">Your view follows you, showing about 200m around your position. Radar arrows on the edge point toward seeds further out.</div>
     <div class="map-scene"><div id="leafletMap"></div><div class="radar-layer" id="radarLayer"></div></div>
     <div class="card" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
       <div class="screen-sub" id="mapLocChip" style="margin:0;">${mapLocationText()}</div>
-      <div style="display:flex; gap:6px; flex-wrap:wrap;" id="mapLocBtnWrap">${locBtn}${compassBtn}${notifBtn}</div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;" id="mapLocBtnWrap">${locBtn}${compassBtn}${walkBtn}${notifBtn}</div>
     </div>
     <div class="screen-sub" style="text-align:center;">2-3 seeds always sprout organically within 500m — collect one and a replacement grows back in 10-30 min. Rarer seeds sprout on their own every few hours and vanish if left too long (12h).</div>
   `;
@@ -2537,13 +2666,17 @@ function completeTear(leftHalf, rightHalf){
 }
 
 /* ===================== ACTIONS ===================== */
-function simulateSteps(){
-  state.totalSteps += 500;
+// Shared walking-progression loop: applies `n` steps to totalSteps and every potted seed's
+// growth, checks for a level-up, and re-renders/animates as appropriate. Used by both the
+// existing debug "+500 steps" button and the new real accelerometer-driven step counter, so
+// real walking drives the exact same seed growth / distance tracking / leveling logic.
+function addSteps(n){
+  state.totalSteps += n;
   const growthUpdates = [];
   state.pots = state.pots.map((p,i)=>{
     if(!p) return p;
     const type = SEED_TYPES[p.type];
-    const newProgress = Math.min(type.threshold, p.progress + 500);
+    const newProgress = Math.min(type.threshold, p.progress + n);
     if(newProgress > p.progress) growthUpdates.push({index:i, from:p.progress, to:newProgress, threshold:type.threshold});
     return {...p, progress:newProgress};
   });
@@ -2553,6 +2686,10 @@ function simulateSteps(){
   } else {
     render();
   }
+  return { growthUpdates, leveled };
+}
+function simulateSteps(){
+  const { growthUpdates, leveled } = addSteps(500);
   if(!leveled){
     const anyReady = growthUpdates.some(u=> u.to >= u.threshold && u.from < u.threshold);
     if(anyReady) toast('🌼 A plant is ready to harvest!');
@@ -2763,6 +2900,7 @@ function handleClick(e){
       if(action === 'confirm-compost'){ confirmCompostAnimated(); return; }
       if(action === 'enable-location'){ requestLocation(); return; }
       if(action === 'enable-compass'){ requestCompass(); return; }
+      if(action === 'toggle-walk'){ toggleWalkSession(); return; }
       if(action === 'enable-notifications'){ requestNotifications(); return; }
       if(action === 'collect-nearest'){ if(inRangeSpawnUid) collectWildSpawn(inRangeSpawnUid); return; }
     }
@@ -2800,7 +2938,7 @@ setInterval(cycleWeather, 14000);
 mapWorldTimer = setInterval(mapWorldTick, MAP_TICK_MS);
 // Reconcile against Date.now() whenever the app regains focus/visibility — handles the device
 // sleeping, the tab being backgrounded, or the clock otherwise drifting while we were away.
-window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible'){ mapWorldTick(); ensureLocationTrackingActive(); } });
+window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible'){ mapWorldTick(); ensureLocationTrackingActive(); if(state.walkActive && !wakeLockSentinel) requestWakeLock(); } });
 window.addEventListener('focus', ()=>{ mapWorldTick(); ensureLocationTrackingActive(); });
 window.addEventListener('resize', ()=>{ if(leafletMapInstance) updateRadarArrows(); });
 </script>
