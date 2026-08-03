@@ -189,11 +189,12 @@
 
   .bottom-nav{
     position:absolute; left:0; right:0; bottom:0; display:flex; background:var(--paper);
-    border-top:2px solid var(--line); padding: 10px 4px calc(10px + env(safe-area-inset-bottom)); z-index:10;
+    border-top:2px solid var(--line); padding: 10px 4px calc(10px + env(safe-area-inset-bottom)); z-index:20;
   }
   .nav-btn{
-    position:relative; flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; background:none; border:none;
-    cursor:pointer; color:var(--ink-soft); padding:6px 0; font-family:'Nunito',sans-serif; font-weight:800; font-size:10px;
+    position:relative; flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    background:none; border:none; cursor:pointer; color:var(--ink-soft); padding:6px 0; min-height:46px;
+    font-family:'Nunito',sans-serif; font-weight:800; font-size:10px; pointer-events:auto;
   }
   .nav-btn.active{ color:var(--moss-dark); }
   .nav-btn.pulse{ animation: navPulse 0.6s ease; }
@@ -342,6 +343,7 @@
     width:24px; height:24px; border-radius:50% 50% 50% 4px; display:flex; align-items:center; justify-content:center;
     color:#fff; font-size:11px; font-weight:800; box-shadow:0 2px 6px rgba(74,55,40,0.35); border:2px solid #fff;
   }
+  .radar-arrow-icon{ display:block; }
   .radar-arrow-shape.spawn-common{ background:linear-gradient(160deg, var(--moss-light), var(--moss)); }
   .radar-arrow-shape.spawn-uncommon{ background:linear-gradient(160deg, var(--blush-light), var(--blush)); }
   .radar-arrow-shape.spawn-rare{ background:linear-gradient(160deg, #B49BDE, var(--lavender)); }
@@ -470,6 +472,62 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
+/* ===================== STORAGE FALLBACK (architectural safeguard) ===================== */
+// The Claude artifact environment provides window.storage. Outside that environment (a plain
+// browser deployment of this file) it won't exist, and every persistence call would silently no-op.
+// This installs a same-shaped localStorage-backed polyfill ONLY if a real window.storage isn't
+// already present, so save/load keeps working either way. Every method is wrapped so a disabled
+// or full localStorage (private browsing, quota) degrades to "no persistence" instead of crashing.
+(function installStorageFallback(){
+  if(typeof window === 'undefined' || window.storage) return; // real one already provided — don't touch it
+  const PREFIX = 'flora_ls_';
+  function hasLocalStorage(){
+    try{
+      const testKey = '__flora_ls_test__';
+      localStorage.setItem(testKey, '1');
+      localStorage.removeItem(testKey);
+      return true;
+    }catch(e){ return false; }
+  }
+  const available = hasLocalStorage();
+  window.storage = {
+    async get(key){
+      if(!available) return null;
+      try{
+        const raw = localStorage.getItem(PREFIX + key);
+        return raw === null ? null : { key, value: raw, shared: false };
+      }catch(e){ console.error('Flora storage fallback get error:', e); return null; }
+    },
+    async set(key, value){
+      if(!available) return null;
+      try{
+        localStorage.setItem(PREFIX + key, value);
+        return { key, value, shared: false };
+      }catch(e){ console.error('Flora storage fallback set error:', e); return null; }
+    },
+    async delete(key){
+      if(!available) return null;
+      try{
+        localStorage.removeItem(PREFIX + key);
+        return { key, deleted: true, shared: false };
+      }catch(e){ console.error('Flora storage fallback delete error:', e); return null; }
+    },
+    async list(prefix){
+      if(!available) return null;
+      try{
+        const keys = [];
+        for(let i=0;i<localStorage.length;i++){
+          const k = localStorage.key(i);
+          if(k && k.indexOf(PREFIX) === 0){
+            const bare = k.slice(PREFIX.length);
+            if(!prefix || bare.indexOf(prefix) === 0) keys.push(bare);
+          }
+        }
+        return { keys, prefix, shared: false };
+      }catch(e){ console.error('Flora storage fallback list error:', e); return null; }
+    }
+  };
+})();
 /* ===================== DEVICE DETECTION & VIEWPORT ===================== */
 function detectDevice(){
   const ua = navigator.userAgent || '';
@@ -681,6 +739,7 @@ const VIEWPORT_RADIUS_M = 100;    // ~200m window shown around the player at onc
 const AMBIENT_RADIUS_M = 500;     // ambient (both-pool) seeds spawn up to 500m from the player
 const SPECIAL_RADIUS_M = 1200;    // map-only special seeds can spawn up to 1200m out (longer walks)
 const POI_FETCH_RADIUS_M = Math.max(AMBIENT_RADIUS_M, SPECIAL_RADIUS_M); // covers both spawn kinds
+const POI_REFETCH_THRESHOLD_M = 300; // re-query Overpass once the player has wandered this far from the last fetch center
 
 // Ambient seeds: always 2-3 alive at once, drawn from the "Both" (shop+map) pool, weighted so
 // commons are frequent and legendaries are rare.
@@ -715,15 +774,6 @@ const SAFE_SPAWN_MAX_ATTEMPTS = 10;
 
 function randBetween(min, max){ return min + Math.random()*(max-min); }
 
-// Small, hand-placed cluster used only when real OSM POI data can't be fetched
-// (offline, blocked network, or a genuinely POI-sparse rural area). Purely decorative context —
-// seeds are only ever *biased toward* real POIs like these, never snapped exactly onto them.
-const POI_FALLBACK_DEFS = [
-  {type:'cafe',       icon:'☕', label:'Sunny Corner Café', angle:0.3, dist:120},
-  {type:'park',       icon:'🌳', label:'Willow Park',        angle:2.1, dist:260},
-  {type:'building',   icon:'🏢', label:'Old Greenhouse',     angle:4.0, dist:180},
-  {type:'restaurant', icon:'🍽️', label:'The Garden Table',   angle:5.2, dist:340}
-];
 // BUG FIX (the "spawns 15,000m away" report): cos(latitude) was used unclamped as a divisor when
 // converting a meter offset into a longitude delta. Near the poles (or on any bad/edge-case GPS
 // reading close to lat=±90) cos(lat) collapses toward 0, so dividing by it blew the longitude
@@ -756,9 +806,6 @@ function clampedPointNear(center, minM, maxM){
   // Deterministic, guaranteed-safe fallback if something is still off after 5 tries.
   return offsetLatLon(center, Math.min(maxM*0.6, Math.max(minM, 20)), Math.random()*Math.PI*2);
 }
-function generateFallbackPOIs(center){
-  return POI_FALLBACK_DEFS.map(d=>({ ...d, ...offsetLatLon(center, d.dist, d.angle) }));
-}
 function boundsForRadius(center, radiusM){
   const latRad = center.lat*Math.PI/180;
   const cosLat = Math.max(Math.cos(latRad), 0.01);
@@ -771,7 +818,9 @@ function boundsForRadius(center, radiusM){
 }
 // Real OpenStreetMap POI lookup (cafes, restaurants, parks, buildings) within the seed radius.
 // This is purely decorative map context — it never determines where a seed spawns.
-// Falls back to the small hand-placed cluster above if the request fails, times out, or is empty.
+// Returns only verified, currently-active nodes; anything disused/closed/unverifiable is
+// discarded rather than shown as a real place. If the fetch itself fails, returns null (see
+// loadNearbyPOIs) — no fabricated placeholder POIs are ever substituted in its place.
 async function fetchOSMPOIs(center){
   const query = `[out:json][timeout:12];(`
     + `node["amenity"~"^(cafe|restaurant|fast_food|bar|pub)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
@@ -788,6 +837,11 @@ async function fetchOSMPOIs(center){
     const data = await res.json();
     const pois = (data.elements || []).map(el=>{
       const tags = el.tags || {};
+      // Strict verified/active check: discard anything explicitly marked disused, closed, or
+      // otherwise flagged as no longer operating, rather than presenting it as a real place.
+      if(tags.disused === 'yes' || tags['disused:amenity'] || tags['disused:leisure']) return null;
+      if(tags.opening_hours === 'off' || tags.opening_hours === 'closed') return null;
+      if(/^(closed|disused|was|demolished|razed)$/i.test(String(tags.life_cycle || ''))) return null;
       const lat = el.lat ?? (el.center && el.center.lat);
       const lon = el.lon ?? (el.center && el.center.lon);
       if(lat == null || lon == null) return null;
@@ -802,14 +856,15 @@ async function fetchOSMPOIs(center){
     return pois;
   }catch(e){
     clearTimeout(timer);
-    console.error('Flora OSM POI fetch failed, using fallback cluster:', e);
-    return null; // signal caller to use the fallback
+    console.error('Flora OSM POI fetch failed:', e);
+    return null; // signal caller that no verified POI data is available right now
   }
 }
+// Returns only real, verified POIs. If Overpass fails or turns up nothing, this returns an empty
+// list rather than fabricated placeholder pins — no phantom/fake POIs are ever shown on the map.
 async function loadNearbyPOIs(center){
   const osm = await fetchOSMPOIs(center);
-  if(osm && osm.length) return osm.slice(0, 40);
-  return generateFallbackPOIs(center);
+  return osm && osm.length ? osm.slice(0, 40) : [];
 }
 // Strict safety exclusion zones: schools, hospitals, and similar sensitive locations, plus a
 // best-effort residential-building buffer, fetched once per map session. Nothing here is ever
@@ -871,6 +926,32 @@ function pickSafeSpawnPoint(center, minM, maxM){
   // this collides with a safety zone (extremely dense sensitive area), it's still returned —
   // an unlucky-but-rare spawn beats silently breaking the game for that player.
   return clampedPointNear(center, minM, Math.max(minM, Math.min(maxM, 80)));
+}
+// Fix: the map now dynamically keeps its Overpass data current as the player walks, instead of
+// only fetching once when the map tab first opens. Re-queries POIs + safety zones once the
+// player has moved more than POI_REFETCH_THRESHOLD_M from where they were last fetched, and
+// rebuilds the decorative POI markers to match. Uses the same Leaflet-race guard as map init.
+async function maybeRefreshPOIs(center){
+  if(!leafletMapInstance || typeof L === 'undefined') return;
+  if(poiRefreshInFlight) return;
+  if(lastPOIFetchCenter && haversineMeters(lastPOIFetchCenter.lat, lastPOIFetchCenter.lon, center.lat, center.lon) < POI_REFETCH_THRESHOLD_M) return;
+  poiRefreshInFlight = true;
+  const myGeneration = mapGeneration;
+  try{
+    const [pois, zones] = await Promise.all([ loadNearbyPOIs(center), fetchSafetyZones(center) ]);
+    if(myGeneration !== mapGeneration || !leafletMapInstance) return; // tab closed / map torn down mid-fetch
+    state.mapPOIs = pois;
+    safetyZones = zones;
+    lastPOIFetchCenter = center;
+    poiMarkers.forEach(m=> leafletMapInstance.removeLayer(m));
+    poiMarkers = state.mapPOIs.map(poi=>{
+      const icon = L.divIcon({ className:'', html:`<div class="map-poi-icon poi-${poi.type}"><span>${poi.icon}</span></div>`, iconSize:[30,30] });
+      const m = L.marker([poi.lat, poi.lon], {icon}).addTo(leafletMapInstance);
+      m.on('click', ()=> toast(`📍 ${poi.label}`));
+      return m;
+    });
+  }catch(e){ console.error('Flora POI refresh error:', e); }
+  finally{ poiRefreshInFlight = false; }
 }
 function getPlayerCoords(){
   if(state.mapLocation.status === 'granted') return {lat: state.mapLocation.lat, lon: state.mapLocation.lon};
@@ -1152,6 +1233,8 @@ let playerMarker = null;
 let spawnMarkers = {};       // uid -> Leaflet marker
 let poiMarkers = [];
 let safetyZones = []; // schools/hospitals/residential exclusion buffer, fetched per map session
+let lastPOIFetchCenter = null; // where POIs/safety-zones were last fetched from
+let poiRefreshInFlight = false;
 let watchId = null;
 let mapGeneration = 0;       // bumped on every init/destroy so stale async work (OSM fetch) is ignored
 let lastGeoUpdateTs = 0;
@@ -1171,6 +1254,9 @@ function mapLocationText(){
   if(loc.status==='locating') return '📍 Locating...';
   return '📍 Location not enabled yet';
 }
+// Starts a single, global navigator.geolocation.watchPosition that keeps state.mapLocation (and
+// watchId) updated for the entire app session — independent of which tab is active. This is
+// intentionally NOT re-created or torn down when the map tab mounts/unmounts; see destroyLeafletMap.
 function requestLocation(){
   if(!navigator.geolocation){ state.mapLocation = {status:'denied', lat:null, lon:null}; render(); return; }
   state.mapLocation = {status:'locating', lat:null, lon:null};
@@ -1203,12 +1289,19 @@ function requestLocation(){
           updatePlayerMarkerOnMap();
           updateRadarArrows();
           updateProximityState();
+          maybeRefreshPOIs({lat: pos.coords.latitude, lon: pos.coords.longitude});
         }
       },
       err=>{ console.error('Flora geolocation error:', err); state.mapLocation = {status:'denied', lat:null, lon:null}; render(); },
       { enableHighAccuracy:true, timeout:10000, maximumAge:5000 }
     );
   }catch(e){ console.error('Flora geolocation setup error:', e); state.mapLocation = {status:'denied', lat:null, lon:null}; render(); }
+}
+// Defensive safeguard: if tracking was previously granted but the underlying watch was somehow
+// lost (e.g. the OS silently dropped it while the device was asleep), restart it. Called from the
+// existing visibility/focus handlers below — never removes or replaces any other behavior there.
+function ensureLocationTrackingActive(){
+  if(state.mapLocation.status === 'granted' && watchId === null) requestLocation();
 }
 function requestNotifications(){
   try{
@@ -1607,17 +1700,49 @@ function resolveSpawnLandmark(spawn){
 // with distance and a real-world landmark/street name beneath it. Because this rebuilds its HTML
 // from scratch on every call using getPlayerCoords() at call-time — never a cached/stale position —
 // every arrow's rotation AND on-screen position both update together as the player physically walks.
+// Fix: the radar distance labels used to be torn down and rebuilt from scratch on every call
+// (via layer.innerHTML = ...), which made a smooth counter impossible — a brand new text node
+// has no "previous value" to animate from. radarArrowEls keeps one persistent DOM node per
+// off-screen spawn so its label can be stepped smoothly; radarMeterAnim tracks each label's
+// currently-displayed value and in-flight timer.
+let radarArrowEls = {};   // uid -> { wrap, shape, iconEl, label, landmark }
+let radarMeterAnim = {};  // uid -> { current, timer }
+const METER_STEP_MS = 40;        // how often the displayed number moves by 1
+const METER_SNAP_THRESHOLD_M = 60; // jumps bigger than this (e.g. first paint) snap instantly instead of crawling
+function stepMeterLabel(uid, el, targetValue){
+  if(!el || !Number.isFinite(targetValue)) return;
+  let anim = radarMeterAnim[uid];
+  if(!anim){ anim = { current: targetValue, timer: null }; radarMeterAnim[uid] = anim; }
+  if(Math.abs(anim.current - targetValue) > METER_SNAP_THRESHOLD_M) anim.current = targetValue;
+  if(anim.timer) clearTimeout(anim.timer);
+  const tick = ()=>{
+    if(anim.current === targetValue){ el.textContent = anim.current + 'm'; anim.timer = null; return; }
+    anim.current += anim.current < targetValue ? 1 : -1; // always a smooth single-unit step
+    el.textContent = anim.current + 'm';
+    anim.timer = setTimeout(tick, METER_STEP_MS);
+  };
+  tick();
+}
 function updateRadarArrows(){
   if(!leafletMapInstance) return;
   const layer = document.getElementById('radarLayer');
   const scene = document.querySelector('.map-scene');
   if(!layer || !scene) return;
   const w = scene.clientWidth, h = scene.clientHeight;
-  if(!w || !h){ layer.innerHTML = ''; return; }
+  if(!w || !h) return;
   const player = getPlayerCoords();
-  if(!Number.isFinite(player.lat) || !Number.isFinite(player.lon)){ layer.innerHTML = ''; return; }
+  if(!Number.isFinite(player.lat) || !Number.isFinite(player.lon)) return;
   const offScreen = state.mapSpawns.filter(s=> haversineMeters(player.lat, player.lon, s.lat, s.lon) > VIEWPORT_RADIUS_M);
-  layer.innerHTML = offScreen.map(spawn=>{
+  const liveUids = new Set(offScreen.map(s=>s.uid));
+  // Remove arrows for spawns that are no longer off-screen / no longer active.
+  Object.keys(radarArrowEls).forEach(uid=>{
+    if(!liveUids.has(uid)){
+      radarArrowEls[uid].wrap.remove();
+      delete radarArrowEls[uid];
+      if(radarMeterAnim[uid]){ if(radarMeterAnim[uid].timer) clearTimeout(radarMeterAnim[uid].timer); delete radarMeterAnim[uid]; }
+    }
+  });
+  offScreen.forEach(spawn=>{
     const dist = Math.round(haversineMeters(player.lat, player.lon, spawn.lat, spawn.lon));
     const bearing = computeBearing(player.lat, player.lon, spawn.lat, spawn.lon);
     const { x, y } = edgePointForBearing(bearing, w, h, 26);
@@ -1625,19 +1750,38 @@ function updateRadarArrows(){
     const icon = type.tierKey==='common' ? '🌱' : type.tierKey==='uncommon' ? '🌸' : type.tierKey==='rare' ? '💜' : type.tierKey==='epic' ? '✨' : '👑';
     if(!spawn.landmark && !spawn.landmarkPending) resolveSpawnLandmark(spawn);
     const landmarkText = spawn.landmark || 'locating…';
-    return `<div class="radar-arrow" data-spawn="${spawn.uid}" style="left:${x}px; top:${y}px; transform:translate(-50%,-50%);">
-      <div class="radar-arrow-shape spawn-${type.tierKey}" style="transform:rotate(${bearing}deg);">
-        <span class="radar-arrow-tip"></span><span style="transform:rotate(${-bearing}deg); display:block;">${icon}</span>
-      </div>
-      <div class="radar-arrow-label">${dist}m</div>
-      <div class="radar-arrow-landmark">${landmarkText}</div>
-    </div>`;
-  }).join('');
-  layer.querySelectorAll('.radar-arrow').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      const spawn = state.mapSpawns.find(s=>s.uid===el.dataset.spawn);
-      if(spawn) toast(`🧭 ${SEED_TYPES[spawn.key].name} is about ${Math.round(haversineMeters(player.lat, player.lon, spawn.lat, spawn.lon))}m away, near ${spawn.landmark || 'you'}.`);
-    });
+    let entry = radarArrowEls[spawn.uid];
+    if(!entry){
+      const wrap = document.createElement('div');
+      wrap.className = 'radar-arrow';
+      wrap.dataset.spawn = spawn.uid;
+      wrap.innerHTML = `<div class="radar-arrow-shape spawn-${type.tierKey}">`
+        + `<span class="radar-arrow-tip"></span><span class="radar-arrow-icon">${icon}</span></div>`
+        + `<div class="radar-arrow-label"></div><div class="radar-arrow-landmark"></div>`;
+      wrap.addEventListener('click', ()=>{
+        const p = getPlayerCoords();
+        const s = state.mapSpawns.find(x=>x.uid===spawn.uid);
+        if(s) toast(`🧭 ${SEED_TYPES[s.key].name} is about ${Math.round(haversineMeters(p.lat, p.lon, s.lat, s.lon))}m away, near ${s.landmark || 'you'}.`);
+      });
+      layer.appendChild(wrap);
+      entry = {
+        wrap,
+        shape: wrap.querySelector('.radar-arrow-shape'),
+        iconEl: wrap.querySelector('.radar-arrow-icon'),
+        label: wrap.querySelector('.radar-arrow-label'),
+        landmark: wrap.querySelector('.radar-arrow-landmark')
+      };
+      radarArrowEls[spawn.uid] = entry;
+      radarMeterAnim[spawn.uid] = { current: dist, timer: null }; // first paint shows the exact value
+      entry.label.textContent = dist + 'm';
+    }
+    entry.wrap.style.left = x + 'px';
+    entry.wrap.style.top = y + 'px';
+    entry.wrap.style.transform = 'translate(-50%,-50%)';
+    entry.shape.style.transform = `rotate(${bearing}deg)`;
+    if(entry.iconEl) entry.iconEl.style.transform = `rotate(${-bearing}deg)`;
+    if(entry.landmark) entry.landmark.textContent = landmarkText;
+    stepMeterLabel(spawn.uid, entry.label, dist);
   });
 }
 
@@ -1692,6 +1836,7 @@ async function initLeafletMap(){
     if(myGeneration !== mapGeneration || !leafletMapInstance) return; // player left the tab mid-fetch
     state.mapPOIs = pois;
     safetyZones = zones;
+    lastPOIFetchCenter = center;
     poiMarkers = state.mapPOIs.map(poi=>{
       const icon = L.divIcon({ className:'', html:`<div class="map-poi-icon poi-${poi.type}"><span>${poi.icon}</span></div>`, iconSize:[30,30] });
       const m = L.marker([poi.lat, poi.lon], {icon}).addTo(leafletMapInstance);
@@ -1704,9 +1849,16 @@ function destroyLeafletMap(){
   mapGeneration++; // invalidates any in-flight OSM POI fetch from this session
   detachCompassListener();
   try{
-    if(watchId !== null && navigator.geolocation){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+    // NOTE: navigator.geolocation.watchPosition is intentionally NOT cleared here. It is a
+    // global background tracker (started in requestLocation) that must keep running regardless
+    // of which tab is active — clearing it here was the bug that froze location tracking every
+    // time the player navigated away from the map.
     if(leafletMapInstance){ leafletMapInstance.remove(); leafletMapInstance = null; }
     playerMarker = null; spawnMarkers = {}; poiMarkers = [];
+    Object.values(radarMeterAnim).forEach(anim=>{ if(anim.timer) clearTimeout(anim.timer); });
+    radarArrowEls = {};
+    radarMeterAnim = {};
+    lastPOIFetchCenter = null;
     inRangeSpawnUid = null;
     hideHarvestPrompt();
   }catch(e){ console.error('Flora map cleanup error:', e); }
@@ -2648,8 +2800,8 @@ setInterval(cycleWeather, 14000);
 mapWorldTimer = setInterval(mapWorldTick, MAP_TICK_MS);
 // Reconcile against Date.now() whenever the app regains focus/visibility — handles the device
 // sleeping, the tab being backgrounded, or the clock otherwise drifting while we were away.
-window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') mapWorldTick(); });
-window.addEventListener('focus', mapWorldTick);
+window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible'){ mapWorldTick(); ensureLocationTrackingActive(); } });
+window.addEventListener('focus', ()=>{ mapWorldTick(); ensureLocationTrackingActive(); });
 window.addEventListener('resize', ()=>{ if(leafletMapInstance) updateRadarArrows(); });
 </script>
 </body>
