@@ -202,11 +202,25 @@
 
   .bottom-nav{
     position:absolute; left:0; right:0; bottom:0; display:flex; background:var(--paper);
-    border-top:2px solid var(--line); padding: 10px 4px calc(10px + env(safe-area-inset-bottom)); z-index:20;
+    border-top:2px solid var(--line); z-index:20;
+    /* BUG FIX (ghost/blocked taps between nav buttons): the vertical breathing-room padding used
+       to live here, on the shared container. That padding was part of the bar's painted
+       background but NOT part of any individual .nav-btn's own box, so the top/bottom bands of
+       every tab column (including the Map/Pouch boundary area) were an invisible dead zone a
+       user could tap and get nothing. flex's default align-items:stretch already makes each
+       .nav-btn fill the container's full cross-axis height, and flex:1 with no gap already tiles
+       the buttons edge-to-edge horizontally with zero space between them — moving the same
+       padding values onto each button below (instead of the container) means every pixel of the
+       bar's height and width now belongs to exactly one button, with the same visual spacing.
+       Horizontal edge padding stays here since it's outside all buttons either way. */
+    padding: 0 4px;
+    gap: 0;
   }
   .nav-btn{
     position:relative; flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
-    background:none; border:none; cursor:pointer; color:var(--ink-soft); padding:6px 0; min-height:46px;
+    background:none; border:none; cursor:pointer; color:var(--ink-soft);
+    padding: 10px 0 calc(10px + env(safe-area-inset-bottom));
+    margin:0; min-height:46px;
     font-family:'Nunito',sans-serif; font-weight:800; font-size:10px; pointer-events:auto;
     -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; touch-action:manipulation; outline:none;
   }
@@ -845,10 +859,13 @@ function randBetween(min, max){ return min + Math.random()*(max-min); }
 // reading close to lat=±90) cos(lat) collapses toward 0, so dividing by it blew the longitude
 // delta up to enormous, wildly-wrong values — a spawn that was supposed to be 30m away could
 // land thousands of km off. Clamping cos(lat) to a small positive floor caps how large that
-// division can ever get, so the offset math can no longer explode past its intended radius.
+// division can ever get, so the offset math can no longer explode past its intended radius. This
+// same floor is shared by every site in the file that divides by cos(lat), rather than each one
+// carrying its own repeated magic number.
+const MIN_COS_LAT = 0.01;
 function offsetLatLon(center, distM, angleRad){
   const latRad = center.lat*Math.PI/180;
-  const cosLat = Math.max(Math.cos(latRad), 0.01);
+  const cosLat = Math.max(Math.cos(latRad), MIN_COS_LAT);
   const dLat = (distM*Math.cos(angleRad))/111320;
   const dLon = (distM*Math.sin(angleRad))/(111320*cosLat);
   return { lat: center.lat+dLat, lon: center.lon+dLon };
@@ -874,7 +891,7 @@ function clampedPointNear(center, minM, maxM){
 }
 function boundsForRadius(center, radiusM){
   const latRad = center.lat*Math.PI/180;
-  const cosLat = Math.max(Math.cos(latRad), 0.01);
+  const cosLat = Math.max(Math.cos(latRad), MIN_COS_LAT);
   const dLat = radiusM/111320;
   const dLon = radiusM/(111320*cosLat);
   return L.latLngBounds(
@@ -895,7 +912,7 @@ const OVERPASS_CACHE_GRID_M = 250;        // grid-bucket size
 const overpassCache = {}; // gridKey -> { timestamp, pois, zones }
 function overpassGridKey(center){
   const latStep = OVERPASS_CACHE_GRID_M / 111320;
-  const cosLat = Math.max(Math.cos(center.lat*Math.PI/180), 0.01);
+  const cosLat = Math.max(Math.cos(center.lat*Math.PI/180), MIN_COS_LAT);
   const lonStep = OVERPASS_CACHE_GRID_M / (111320*cosLat);
   return Math.round(center.lat/latStep) + ',' + Math.round(center.lon/lonStep);
 }
@@ -1979,18 +1996,38 @@ function resolveSpawnLandmark(spawn){
 // off-screen spawn so its label can be stepped smoothly; radarMeterAnim tracks each label's
 // currently-displayed value and in-flight timer.
 let radarArrowEls = {};   // uid -> { wrap, shape, iconEl, label, landmark }
-let radarMeterAnim = {};  // uid -> { current, timer }
+let radarMeterAnim = {};  // uid -> { current, target, dir, timer }
 const METER_STEP_MS = 40;        // how often the displayed number moves by 1
 const METER_SNAP_THRESHOLD_M = 60; // jumps bigger than this (e.g. first paint) snap instantly instead of crawling
-function stepMeterLabel(uid, el, targetValue){
-  if(!el || !Number.isFinite(targetValue)) return;
+// BUG FIX (meter oscillating on sidestep/angled movement): getSmoothedPlayerCoords() already
+// filters GPS position noise, but even a genuinely-filtered position can still edge the raw
+// distance-to-spawn up and down by a meter or two while the player is moving on an angle relative
+// to the spawn (sidestepping, weaving around an obstacle, etc.) rather than walking straight
+// toward/away from it. Without this, that would show up as the displayed meter briefly counting
+// the "wrong" direction even though nothing about the underlying motion was actually erratic.
+// METER_HYSTERESIS_M requires a direction reversal to be at least this many meters before it's
+// accepted as real; anything smaller is held at the last committed value instead of flickering.
+const METER_HYSTERESIS_M = 2;
+function stepMeterLabel(uid, el, rawTargetValue){
+  if(!el || !Number.isFinite(rawTargetValue)) return;
   let anim = radarMeterAnim[uid];
-  if(!anim){ anim = { current: targetValue, timer: null }; radarMeterAnim[uid] = anim; }
-  if(Math.abs(anim.current - targetValue) > METER_SNAP_THRESHOLD_M) anim.current = targetValue;
+  if(!anim){ anim = { current: rawTargetValue, target: rawTargetValue, dir: 0, timer: null }; radarMeterAnim[uid] = anim; }
+  const priorTarget = Number.isFinite(anim.target) ? anim.target : rawTargetValue;
+  const delta = rawTargetValue - priorTarget;
+  let nextTarget = rawTargetValue;
+  if(delta !== 0 && anim.dir !== 0){
+    const reversing = (delta > 0 ? 1 : -1) !== anim.dir;
+    if(reversing && Math.abs(delta) < METER_HYSTERESIS_M) nextTarget = priorTarget; // small reversal — treat as noise, hold steady
+  }
+  if(nextTarget !== priorTarget) anim.dir = nextTarget > priorTarget ? 1 : -1;
+  anim.target = nextTarget;
+  if(Math.abs(anim.current - anim.target) > METER_SNAP_THRESHOLD_M) anim.current = anim.target;
   if(anim.timer) clearTimeout(anim.timer);
   const tick = ()=>{
-    if(anim.current === targetValue){ el.textContent = anim.current + 'm'; anim.timer = null; return; }
-    anim.current += anim.current < targetValue ? 1 : -1; // always a smooth single-unit step
+    if(anim.current === anim.target){ el.textContent = anim.current + 'm'; anim.timer = null; return; }
+    // Always exactly one meter per step — decreasing while closing in, increasing while pulling
+    // away — so the number's direction of travel always matches the player's real motion.
+    anim.current += anim.current < anim.target ? 1 : -1;
     el.textContent = anim.current + 'm';
     anim.timer = setTimeout(tick, METER_STEP_MS);
   };
@@ -2048,7 +2085,7 @@ function updateRadarArrows(){
         landmark: wrap.querySelector('.radar-arrow-landmark')
       };
       radarArrowEls[spawn.uid] = entry;
-      radarMeterAnim[spawn.uid] = { current: dist, timer: null }; // first paint shows the exact value
+      radarMeterAnim[spawn.uid] = { current: dist, target: dist, dir: 0, timer: null }; // first paint shows the exact value
       entry.label.textContent = dist + 'm';
     }
     entry.wrap.style.left = x + 'px';
