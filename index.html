@@ -241,7 +241,17 @@
   .map-scene{ position:relative; border-radius:20px; overflow:hidden; box-shadow:var(--shadow); border:2px solid #fff; margin-bottom:14px; height:340px; background:#EFE6D2; }
   #leafletMap{ width:100%; height:100%; }
   .leaflet-container{ font-family:'Nunito',sans-serif; background:#EFE6D2 !important; }
-  .leaflet-tile-pane{ filter: saturate(0.92) sepia(0.16) hue-rotate(-4deg) brightness(1.02) contrast(1.12); }
+  /* BUG FIX (muddy/muted map tiles): the previous filter combined saturate(0.92) -- which
+     actively DE-saturated the tiles -- with sepia(0.16), which pushes every hue toward brown.
+     Stacked together they wash Voyager's naturally vibrant park-green / water-blue / bold
+     road-casing colors down into a flat, muted tan, making it hard to tell landmass from water
+     from roads at a glance. Fix: drop the sepia entirely and push saturation up (rather than
+     down) so landmasses read as vivid green and water as clear blue, keep a mild contrast boost
+     so light road casings stay crisp and legible against the fill colors, and trim the hue-rotate
+     to a bare hint so the palette isn't skewed off natural. The gentle warm/parchment feel is
+     still supplied separately (and much more subtly) by the low-opacity .map-scene::before wash
+     below, so it no longer has to be baked into the tile filter itself. */
+  .leaflet-tile-pane{ filter: saturate(1.8) contrast(1.2) brightness(1.03) hue-rotate(-2deg); }
   .leaflet-div-icon{ background:transparent !important; border:none !important; }
   .leaflet-control-attribution{ font-size:9px !important; background:rgba(255,251,244,0.75) !important; color:var(--ink-soft) !important; border-radius:6px 0 0 0 !important; }
   .leaflet-popup-content-wrapper{ background:var(--paper) !important; border-radius:14px !important; box-shadow:var(--shadow) !important; }
@@ -742,6 +752,30 @@ const SPECIAL_RADIUS_M = 1200;    // map-only special seeds can spawn up to 1200
 const POI_FETCH_RADIUS_M = Math.max(AMBIENT_RADIUS_M, SPECIAL_RADIUS_M); // covers both spawn kinds
 const POI_REFETCH_THRESHOLD_M = 300; // re-query Overpass once the player has wandered this far from the last fetch center
 
+// BUG FIX (radar/distance meter occasionally ticking backward): raw consumer-grade GPS fixes
+// jitter by several meters fix-to-fix even while standing still or walking in a straight line, and
+// the old radar meter recomputed its "distance to spawn" straight off the raw fix every tick — so
+// a wobble toward the spawn between two fixes could make the on-screen number count DOWN for a
+// beat even though the player was net moving away. getSmoothedPlayerCoords() (below, near the
+// other geo helpers) low-pass-filters the raw fix through an exponential moving average and,
+// below GPS_NOISE_FLOOR_M, ignores the update entirely (treats it as pure jitter, not real
+// motion) -- so any DISPLAYED distance/vector metric derived from it can only change once the
+// player's underlying position has genuinely, measurably moved. Gameplay-critical checks (e.g.
+// "are you within COLLECT_RADIUS_M to harvest") intentionally keep using the raw, unsmoothed fix
+// via getPlayerCoords() so collection stays accurate to the player's real position.
+const POSITION_EMA_ALPHA = 0.35;  // how quickly the filtered position chases a new raw fix (0-1)
+const GPS_NOISE_FLOOR_M = 6;      // fixes closer than this to the current filtered point are jitter, not motion
+
+// BUG FIX (glitchy far-away seeds): pickSafeSpawnPoint()/clampedPointNear() already clamp each
+// spawn kind to its own radius (500m ambient / 1200m special) at generation time, but this is a
+// second, independent, absolute ceiling checked again right before ANY spawn is committed to
+// state -- regardless of kind, regardless of which code path produced the coordinate, and
+// regardless of which reference point ("current" vs a since-moved player) it was generated
+// against. Any candidate farther than this from the player's position at commit time is dropped
+// and re-rolled rather than ever reaching the map, closing off every future path (not just the
+// ones we've already reasoned through) that could otherwise let a wild coordinate slip through.
+const ABSOLUTE_MAX_SPAWN_DISTANCE_M = 1500;
+
 // Ambient seeds: always 2-3 alive at once, drawn from the "Both" (shop+map) pool, weighted so
 // commons are frequent and legendaries are rare.
 const AMBIENT_TARGET_MIN = 2;
@@ -984,6 +1018,28 @@ async function maybeRefreshPOIs(center){
 function getPlayerCoords(){
   if(state.mapLocation.status === 'granted') return {lat: state.mapLocation.lat, lon: state.mapLocation.lon};
   return DEMO_CENTER;
+}
+// Low-pass-filtered player position for DISPLAY/metric purposes only (see BUG FIX note near
+// POSITION_EMA_ALPHA above). Not used for gameplay-critical checks like harvest-radius.
+let smoothedPlayerCoords = null;
+function getSmoothedPlayerCoords(){
+  const raw = getPlayerCoords();
+  if(!Number.isFinite(raw.lat) || !Number.isFinite(raw.lon)) return raw;
+  if(!smoothedPlayerCoords){ smoothedPlayerCoords = {lat: raw.lat, lon: raw.lon}; return smoothedPlayerCoords; }
+  const movedM = haversineMeters(smoothedPlayerCoords.lat, smoothedPlayerCoords.lon, raw.lat, raw.lon);
+  // A jump larger than the ambient spawn radius means a real teleport (GPS lock just acquired,
+  // demo-center fallback swapped for a real fix, etc.) rather than gradual walking motion --
+  // snap instantly instead of slowly crawling the filtered point across a huge, meaningless delta.
+  if(movedM > AMBIENT_RADIUS_M){ smoothedPlayerCoords = {lat: raw.lat, lon: raw.lon}; return smoothedPlayerCoords; }
+  // Below the noise floor, treat this fix as jitter and leave the filtered position untouched --
+  // this is what stops the on-screen distance meter from ever ticking backward on a stationary
+  // or steadily-approaching/receding player.
+  if(movedM < GPS_NOISE_FLOOR_M) return smoothedPlayerCoords;
+  smoothedPlayerCoords = {
+    lat: smoothedPlayerCoords.lat + (raw.lat - smoothedPlayerCoords.lat) * POSITION_EMA_ALPHA,
+    lon: smoothedPlayerCoords.lon + (raw.lon - smoothedPlayerCoords.lon) * POSITION_EMA_ALPHA
+  };
+  return smoothedPlayerCoords;
 }
 function haversineMeters(lat1,lon1,lat2,lon2){
   const R = 6371000;
@@ -1492,20 +1548,46 @@ function requestCompass(){
 }
 
 /* ---- Persistence: ambient/special spawn state survives reloads (window.storage, best-effort) ---- */
+// BUG FIX (map "regenerates a new random layout every time it's reopened"): the actual spawn
+// layout was always being computed from persisted state correctly, but the write to storage was
+// debounced by MAP_SAVE_DEBOUNCE_MS (500ms) and nothing ever forced that pending write to flush
+// before the page could be closed/reloaded/backgrounded. A quick reload -- e.g. right after the
+// very first bootstrap batch of ambient seeds spawns in -- could land inside that 500ms window,
+// discard the unsaved write, and reload back onto an empty board that then re-rolled a brand new
+// layout, which is exactly what read as "random every time". mapStateSnapshot()/flushMapStateNow()
+// below let every unload-adjacent event force an immediate, un-debounced write so the very latest
+// layout is always the one actually sitting in storage.
 let mapSaveTimer = null;
+function mapStateSnapshot(){
+  return JSON.stringify({
+    spawns: state.mapSpawns,
+    respawnQueue: state.mapRespawnQueue,
+    nextSpecialSpawnAt: state.nextSpecialSpawnAt,
+    ambientTargetCount: state.ambientTargetCount
+  });
+}
 function saveMapStateDebounced(){
   if(mapSaveTimer) clearTimeout(mapSaveTimer);
   mapSaveTimer = setTimeout(async ()=>{
+    mapSaveTimer = null;
     try{
       if(!window.storage) return;
-      await window.storage.set('flora_map_state', JSON.stringify({
-        spawns: state.mapSpawns,
-        respawnQueue: state.mapRespawnQueue,
-        nextSpecialSpawnAt: state.nextSpecialSpawnAt,
-        ambientTargetCount: state.ambientTargetCount
-      }), false);
+      await window.storage.set('flora_map_state', mapStateSnapshot(), false);
     }catch(e){ console.error('Flora map state save error:', e); }
   }, MAP_SAVE_DEBOUNCE_MS);
+}
+// Bypasses the debounce entirely -- called from pagehide/visibilitychange-hidden/beforeunload so
+// the freshest layout is committed to storage immediately instead of racing an in-flight timer.
+function flushMapStateNow(){
+  if(!mapStateLoaded) return;
+  if(mapSaveTimer){ clearTimeout(mapSaveTimer); mapSaveTimer = null; }
+  try{
+    if(!window.storage) return;
+    // Fire-and-forget: unload-time handlers can't reliably await a promise, but window.storage's
+    // set() (real artifact API or the localStorage-backed fallback) both resolve synchronously
+    // enough in practice for this best-effort save to land.
+    window.storage.set('flora_map_state', mapStateSnapshot(), false);
+  }catch(e){ console.error('Flora map state flush error:', e); }
 }
 async function loadMapPersistence(){
   try{
@@ -1548,8 +1630,9 @@ function spawnAmbientSeed(forcedTierKey){
   let key = pickSpeciesForCategoryTier('both', tierKey);
   if(!key) key = DEX_ORDER.find(k=> SEED_TYPES[k].category==='both'); // defensive fallback, should never trigger
   if(!key) return;
-  const { lat, lon } = pickSafeSpawnPoint(player, 15, AMBIENT_RADIUS_M);
-  addSpawnToState(key, lat, lon, 'ambient');
+  const pt = pickGuardedSafeSpawnPoint(player, 15, AMBIENT_RADIUS_M);
+  if(!pt) return; // guard exhausted its attempts — skip this cycle rather than risk a far-away seed
+  addSpawnToState(key, pt.lat, pt.lon, 'ambient');
 }
 // Special timed seeds pull ONLY from the "Map Only" category pool — rarer tiers spawn less often.
 // Special spawns reach further out (up to 1200m) to encourage a longer walk.
@@ -1559,8 +1642,9 @@ function spawnSpecialSeed(){
   let key = pickSpeciesForCategoryTier('map', tierKey);
   if(!key) key = DEX_ORDER.find(k=> SEED_TYPES[k].category==='map');
   if(!key) return;
-  const { lat, lon } = pickSafeSpawnPoint(player, 40, SPECIAL_RADIUS_M);
-  addSpawnToState(key, lat, lon, 'special');
+  const pt = pickGuardedSafeSpawnPoint(player, 40, SPECIAL_RADIUS_M);
+  if(!pt) return; // guard exhausted its attempts — skip this cycle rather than risk a far-away seed
+  addSpawnToState(key, pt.lat, pt.lon, 'special');
   const type = SEED_TYPES[key];
   const label = type.rarityLabel.charAt(0) + type.rarityLabel.slice(1).toLowerCase();
   toast(`✨ A ${label} ${type.name} has sprouted nearby!`);
@@ -1570,6 +1654,25 @@ function pickSpeciesForCategoryTier(category, tierKey){
   const candidates = DEX_ORDER.filter(k=> SEED_TYPES[k].tierKey===tierKey && SEED_TYPES[k].category===category);
   if(!candidates.length) return null;
   return candidates[Math.floor(Math.random()*candidates.length)];
+}
+// BUG FIX (glitchy far-away seeds): pickSafeSpawnPoint() already targets [minM,maxM] for its own
+// spawn kind, but this is the final, absolute, kind-agnostic checkpoint every candidate must clear
+// before it's allowed to become a real spawn — see ABSOLUTE_MAX_SPAWN_DISTANCE_M above for why a
+// second independent gate here (rather than trusting the generator alone) matters. Any candidate
+// whose real haversine distance from the player exceeds the ceiling is instantly dropped and the
+// point is re-rolled from scratch; after a bounded number of attempts it gives up for this tick
+// (ambientMaintenance/maybeFireSpecialSpawn will simply try again on the next world tick) rather
+// than ever letting a wild coordinate through.
+const FAR_SPAWN_GUARD_MAX_ATTEMPTS = 6;
+function pickGuardedSafeSpawnPoint(center, minM, maxM){
+  const cappedMax = Math.min(maxM, ABSOLUTE_MAX_SPAWN_DISTANCE_M);
+  for(let attempt=0; attempt<FAR_SPAWN_GUARD_MAX_ATTEMPTS; attempt++){
+    const pt = pickSafeSpawnPoint(center, minM, cappedMax);
+    const d = haversineMeters(center.lat, center.lon, pt.lat, pt.lon);
+    if(d <= ABSOLUTE_MAX_SPAWN_DISTANCE_M) return pt;
+    console.error('Flora spawn guard: dropped an out-of-range candidate', {distM: Math.round(d), attempt});
+  }
+  return null; // exhausted attempts — caller skips this spawn for now rather than accepting it
 }
 // BUG FIX: seeds "showing up from way too far away" — ambient seeds are only ever allowed to exist
 // within AMBIENT_RADIUS_M (500m, strict) of the player's real position. This is what catches and
@@ -1854,7 +1957,10 @@ function updateRadarArrows(){
   if(!layer || !scene) return;
   const w = scene.clientWidth, h = scene.clientHeight;
   if(!w || !h) return;
-  const player = getPlayerCoords();
+  // Distance/bearing shown on the radar arrows use the SMOOTHED position (see BUG FIX above) so
+  // the meter can't tick backward on GPS jitter; actual gameplay checks elsewhere still use the
+  // raw fix via getPlayerCoords().
+  const player = getSmoothedPlayerCoords();
   if(!Number.isFinite(player.lat) || !Number.isFinite(player.lon)) return;
   const offScreen = state.mapSpawns.filter(s=> haversineMeters(player.lat, player.lon, s.lat, s.lon) > VIEWPORT_RADIUS_M);
   const liveUids = new Set(offScreen.map(s=>s.uid));
@@ -1928,9 +2034,19 @@ async function initLeafletMap(){
     // green, water in soft blue, and roads with real width/casing out of the box — the
     // .leaflet-tile-pane filter above then just adds a light warm parchment wash on top,
     // instead of flattening the map into grayscale like the old Positron + heavy-sepia combo did.
+    // BUG FIX (visible map edge after a short walk): Leaflet only keeps `keepBuffer` extra rings
+    // of tiles loaded outside the current viewport (default 2), and by default only refreshes the
+    // tile grid once panning/zooming is "idle". Because this map recenters itself programmatically
+    // via setView() on every throttled GPS fix (dragging/zoom are disabled for the player), the
+    // old defaults meant a short walk could outrun the pre-loaded ring and genuinely expose blank
+    // map edge before the next tile row/column finished fetching. Raising keepBuffer widens that
+    // pre-fetch/recycling margin well past a typical few-second walking distance between GPS
+    // updates, and updateWhenIdle:false makes the grid keep pulling in new tiles continuously as
+    // setView() moves the center, instead of waiting for movement to "stop" first.
     L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-      maxZoom: 20, subdomains: 'abcd'
+      maxZoom: 20, subdomains: 'abcd',
+      keepBuffer: 8, updateWhenIdle: false, updateWhenZooming: true
     }).addTo(leafletMapInstance);
     // Fit to a ~200m window around the player, regardless of container/screen size.
     leafletMapInstance.fitBounds(boundsForRadius(center, VIEWPORT_RADIUS_M), {animate:false});
@@ -2147,9 +2263,19 @@ function plantSVG(potState){
 /* ===================== POT RENDERING (fixed shelf anchor, tap-to-inspect) ===================== */
 function potVisualInner(potState){
   const ready = potState && (potState.progress >= SEED_TYPES[potState.type].threshold);
+  // BUG FIX (pot growth layering): the pot body/rim SVG previously carried an explicit
+  // z-index:2 while the plant wrapper below it had no z-index at all (auto/0). Per CSS stacking
+  // rules, a positioned element with a higher z-index paints ON TOP of a sibling with z-index:auto
+  // regardless of DOM order or visual overlap — so at low/mid growth fractions the pot's front
+  // wall (the "front lip") was fully occluding the stem/sprout beneath it, and the plant only
+  // became visible once it grew tall enough to clear the pot's total container height entirely.
+  // Fix: the plant wrapper now carries a HIGHER z-index (3) than the pot graphic (2), so the
+  // stem/leaves/flower always render in front of the pot's front lip at every growth stage, while
+  // the soil-rim ellipse (drawn first, inside the same pot <svg>) still visually "holds" the base
+  // of the stem since the stem's own bottom point is anchored at/below that rim line.
   return `
     ${ready ? `<div class="ready-badge">✨ Ready!</div>` : ''}
-    <div style="position:absolute; bottom:22px;">${plantSVG(potState)}</div>
+    <div style="position:absolute; bottom:22px; z-index:3;">${plantSVG(potState)}</div>
     <svg width="78" height="50" viewBox="0 0 88 58" style="position:relative; z-index:2;">
       <ellipse cx="44" cy="14" rx="34" ry="7" fill="#3a2a1c" opacity="0.18"/>
       <path d="M10 12 L18 54 Q44 60 70 54 L78 12 Z" fill="var(--terracotta)" stroke="var(--terracotta-dark)" stroke-width="2" stroke-linejoin="round"/>
@@ -2938,9 +3064,19 @@ setInterval(cycleWeather, 14000);
 mapWorldTimer = setInterval(mapWorldTick, MAP_TICK_MS);
 // Reconcile against Date.now() whenever the app regains focus/visibility — handles the device
 // sleeping, the tab being backgrounded, or the clock otherwise drifting while we were away.
-window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible'){ mapWorldTick(); ensureLocationTrackingActive(); if(state.walkActive && !wakeLockSentinel) requestWakeLock(); } });
+window.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible'){ mapWorldTick(); ensureLocationTrackingActive(); if(state.walkActive && !wakeLockSentinel) requestWakeLock(); }
+  else { flushMapStateNow(); } // going hidden (tab switch, app backgrounded, about to close) — commit the latest layout now
+});
 window.addEventListener('focus', ()=>{ mapWorldTick(); ensureLocationTrackingActive(); });
 window.addEventListener('resize', ()=>{ if(leafletMapInstance) updateRadarArrows(); });
+// pagehide/beforeunload are the last reliable moments before a reload or tab close — force-flush
+// any still-debounced map-state write here too, belt-and-suspenders alongside the visibilitychange
+// flush above, so a fast reload can never land inside the old 500ms debounce window and revert to
+// a stale/empty layout that then looks like it "randomly regenerated".
+window.addEventListener('pagehide', flushMapStateNow);
+window.addEventListener('beforeunload', flushMapStateNow);
+
 </script>
 </body>
 </html>
