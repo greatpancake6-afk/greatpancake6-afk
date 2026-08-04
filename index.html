@@ -65,6 +65,11 @@
     background: linear-gradient(160deg, var(--moss-light), var(--moss));
     border:2px solid #fff; box-shadow: var(--shadow);
     display:flex; align-items:center; justify-content:center; cursor:pointer;
+    /* BUG FIX (hitbox shape): border-radius alone rounds the paint, but the element's actual
+       clickable/tappable box is still the full square — so the 4 corners outside the visible
+       circle were silently tappable too. clip-path makes the hit-test region match the circle
+       exactly, with no visual change (the circle was already the only thing painted there). */
+    clip-path: circle(50%);
   }
   .level-chip{ background:var(--moss); color:#fff; font-weight:800; font-size:10.5px; padding:4px 9px; border-radius:999px; box-shadow:0 2px 0 var(--moss-dark); }
 
@@ -147,6 +152,8 @@
     border-radius:999px; padding:14px 22px; font-family:'Baloo 2',sans-serif; font-size:16px; font-weight:700;
     box-shadow: 0 6px 0 var(--moss-dark), 0 8px 14px rgba(58,82,54,0.35);
     cursor:pointer; transition: transform 0.08s ease;
+    /* BUG FIX (hitbox shape): match the tappable region to the pill's true rounded silhouette. */
+    clip-path: inset(0 round 999px);
   }
   .fab:active{ transform: translateY(4px); box-shadow: 0 2px 0 var(--moss-dark); }
 
@@ -154,7 +161,11 @@
   .shop-card{ margin-top:10px; }
   .section-heading{ display:flex; align-items:center; justify-content:space-between; margin: 6px 0 10px; }
   .section-heading h3{ font-size:16px; margin:0; color:var(--ink);}
-  .pill-btn{ font-family:'Nunito',sans-serif; font-weight:800; font-size:12.5px; border:none; border-radius:999px; padding:8px 14px; cursor:pointer; }
+  .pill-btn{ font-family:'Nunito',sans-serif; font-weight:800; font-size:12.5px; border:none; border-radius:999px; padding:8px 14px; cursor:pointer;
+    /* BUG FIX (hitbox shape): clip the tappable region to the pill's own rounded corners instead
+       of the full rectangular bounding box, matching every pill-btn variant (primary/gold/soft). */
+    clip-path: inset(0 round 999px);
+  }
   .pill-btn.primary{ background:var(--moss); color:#fff; box-shadow:0 3px 0 var(--moss-dark);}
   .pill-btn.gold{ background:var(--gold); color:#4a3416; box-shadow:0 3px 0 #b8842a;}
   .pill-btn.soft{ background:#f1e6cf; color:var(--ink); box-shadow:0 3px 0 #d9c69f;}
@@ -183,6 +194,8 @@
     background: linear-gradient(135deg, var(--gold-light), var(--gold));
     border-radius:18px; padding:12px 14px; border:2px solid #d8972c; cursor:pointer;
     animation: bob 2s ease-in-out infinite;
+    /* BUG FIX (hitbox shape): match the tappable region to the card's own rounded corners. */
+    clip-path: inset(0 round 18px);
   }
   .streak-card b{ display:block; font-size:14px; color:#4a3416; }
   .streak-card span{ font-size:11px; color:#6b4d1c; font-weight:700; }
@@ -224,6 +237,8 @@
     position:absolute; top:14px; right:14px; background:var(--paper); border:2px solid var(--line);
     width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center;
     cursor:pointer; font-weight:800; color:var(--ink-soft);
+    /* BUG FIX (hitbox shape): match the tappable region to the circular button exactly. */
+    clip-path: circle(50%);
   }
   .speech-tail{
     position:absolute; top:-9px; left:50%; margin-left:-9px; width:18px; height:18px;
@@ -279,7 +294,14 @@
     transform-origin:50% 50%; transform:rotate(0deg); transition:transform 0.25s ease-out;
     filter: drop-shadow(0 2px 3px rgba(58,82,54,0.45));
   }
-  .map-spawn-icon{ position:relative; width:34px; height:34px; }
+  .map-spawn-icon{
+    position:relative; width:34px; height:34px;
+    /* BUG FIX (hitbox shape): this 34x34 div is the actual Leaflet marker icon that receives the
+       click (iconSize:[34,34]), but the only thing visibly drawn inside it is the 30px circular
+       .map-spawn-mark badge, centered. Without this, the 4 corners of the square icon — outside
+       the visible badge — were silently tappable/collectable even though nothing is drawn there. */
+    clip-path: circle(15px at 50% 50%);
+  }
   .map-spawn-mark{
     position:absolute; left:50%; top:50%; width:30px;height:30px; margin:-15px 0 0 -15px; border-radius:50%;
     color:#fff; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:14px;
@@ -311,6 +333,8 @@
     color:#fff; font-family:'Nunito',sans-serif; font-weight:800; font-size:14px; border:none; border-radius:999px;
     padding:13px 26px; box-shadow:0 10px 22px rgba(201,138,28,0.45), 0 0 0 3px rgba(255,255,255,0.6) inset;
     cursor:pointer; animation: harvestPromptPulse 1.1s ease-in-out infinite;
+    /* BUG FIX (hitbox shape): match the tappable region to the pill's own rounded corners. */
+    clip-path: inset(0 round 999px);
   }
   @keyframes harvestPromptPulse{ 0%,100%{ transform:scale(1);} 50%{ transform:scale(1.035);} }
   .harvest-btn-icon{ font-size:17px; }
@@ -340,6 +364,13 @@
     width:30px; height:30px; border-radius:50% 50% 50% 4px; transform:rotate(45deg);
     display:flex; align-items:center; justify-content:center; font-size:14px;
     box-shadow:0 3px 7px rgba(74,55,40,0.3); border:2.5px solid #fff; cursor:pointer;
+    /* BUG FIX (hitbox shape): this is the exact element Leaflet binds the marker's click handler
+       to (iconSize:[30,30] matches this element's own size 1:1), and its visual "pin" shape comes
+       from an asymmetric border-radius on a rotated square — clip-path reproduces that same
+       rounded-corner geometry (same 4-corner shorthand order as border-radius) so the sharp
+       corner sticking out past the rounded silhouette is the only part that's actually tappable,
+       matching what the player can actually see.  */
+    clip-path: inset(0 round 50% 50% 50% 4px);
   }
   .map-poi-icon span{ display:block; transform:rotate(-45deg); }
   .map-poi-icon.poi-cafe{ background:linear-gradient(160deg, var(--terracotta-rim), var(--terracotta)); }
@@ -1271,7 +1302,11 @@ async function toggleWalkSession(){
   if(state.walkActive){
     state.walkActive = false;
     stopMotionTracking();
-    await releaseWakeLock();
+    // Only release the wake lock here if the Map tab isn't ALSO independently holding it open
+    // (see the map-tab wake lock in render()'s BUG FIX note) — otherwise ending a walk session
+    // while still viewing the map would let the screen sleep and stall the radar/proximity meters
+    // again, right back to the coupling this fix is meant to remove.
+    if(state.tab !== 'map') await releaseWakeLock();
     render();
     toast('🚶 Walk session ended.');
     return;
@@ -1660,19 +1695,30 @@ function pickSpeciesForCategoryTier(category, tierKey){
 // before it's allowed to become a real spawn — see ABSOLUTE_MAX_SPAWN_DISTANCE_M above for why a
 // second independent gate here (rather than trusting the generator alone) matters. Any candidate
 // whose real haversine distance from the player exceeds the ceiling is instantly dropped and the
-// point is re-rolled from scratch; after a bounded number of attempts it gives up for this tick
-// (ambientMaintenance/maybeFireSpecialSpawn will simply try again on the next world tick) rather
-// than ever letting a wild coordinate through.
+// point is re-rolled from scratch. If it's still somehow out of range after every attempt (e.g. an
+// unlucky run of POI-anchored candidates near the very edge of the radius), the point is clamped
+// straight back onto the boundary circle along its own bearing from the player rather than either
+// being accepted as-is or silently skipped — so a spawn always still appears this cycle, and it is
+// mathematically guaranteed to never sit beyond the cap.
 const FAR_SPAWN_GUARD_MAX_ATTEMPTS = 6;
+function clampPointToRadius(center, pt, maxM){
+  const d = haversineMeters(center.lat, center.lon, pt.lat, pt.lon);
+  if(d <= maxM) return pt;
+  const scale = maxM / d;
+  return { lat: center.lat + (pt.lat-center.lat)*scale, lon: center.lon + (pt.lon-center.lon)*scale };
+}
 function pickGuardedSafeSpawnPoint(center, minM, maxM){
   const cappedMax = Math.min(maxM, ABSOLUTE_MAX_SPAWN_DISTANCE_M);
+  let lastPt = null, lastD = Infinity;
   for(let attempt=0; attempt<FAR_SPAWN_GUARD_MAX_ATTEMPTS; attempt++){
     const pt = pickSafeSpawnPoint(center, minM, cappedMax);
     const d = haversineMeters(center.lat, center.lon, pt.lat, pt.lon);
     if(d <= ABSOLUTE_MAX_SPAWN_DISTANCE_M) return pt;
     console.error('Flora spawn guard: dropped an out-of-range candidate', {distM: Math.round(d), attempt});
+    if(d < lastD){ lastD = d; lastPt = pt; } // keep the closest-to-valid candidate seen, in case every attempt fails
   }
-  return null; // exhausted attempts — caller skips this spawn for now rather than accepting it
+  console.error('Flora spawn guard: exhausted retries, clamping to boundary', {distM: Math.round(lastD)});
+  return clampPointToRadius(center, lastPt, cappedMax);
 }
 // BUG FIX: seeds "showing up from way too far away" — ambient seeds are only ever allowed to exist
 // within AMBIENT_RADIUS_M (500m, strict) of the player's real position. This is what catches and
@@ -2150,7 +2196,18 @@ function render(){
 
     const content = document.getElementById('content');
     const leavingMap = lastRenderedTab === 'map' && state.tab !== 'map';
-    if(leavingMap) destroyLeafletMap();
+    if(leavingMap){
+      destroyLeafletMap();
+      // BUG FIX (meters "locked" behind an active walk session): a screen-wake lock was
+      // previously only ever requested inside toggleWalkSession(), so leaving the phone idle on
+      // the Map tab WITHOUT an explicit walk session running let the screen dim/sleep, which in
+      // turn throttles/pauses the GPS watchPosition callbacks and timers that drive the radar and
+      // proximity meters — from the player's perspective the meters simply stopped updating
+      // unless a walk session had been started. The map tab itself now holds its own wake lock
+      // (independent of state.walkActive) for as long as it's open; only release it here if a
+      // walk session isn't ALSO separately relying on it staying held.
+      if(!state.walkActive) releaseWakeLock();
+    }
 
     const stayingOnMap = state.tab === 'map' && lastRenderedTab === 'map' && leafletMapInstance;
     if(state.tab === 'garden') content.innerHTML = renderGarden();
@@ -2158,9 +2215,20 @@ function render(){
       if(!stayingOnMap){
         content.innerHTML = renderMap();
         setTimeout(initLeafletMap, 0);
+        if(!wakeLockSentinel) requestWakeLock(); // see BUG FIX note above — keeps GPS/meters live while the map tab is open
       } else {
         const chip = document.getElementById('mapLocChip');
         if(chip) chip.textContent = mapLocationText();
+        // BUG FIX (walk button state toggle): the fast-path taken while staying on the Map tab
+        // used to skip re-generating the controls row entirely, so this button's label/style never
+        // actually updated on screen after a tap — state.walkActive WAS toggling correctly
+        // underneath, the button DOM node just never got told about it. Update it directly here.
+        const walkBtnEl = document.getElementById('walkSessionBtn');
+        if(walkBtnEl){
+          walkBtnEl.textContent = state.walkActive ? '⏹️ End Walk Session' : '🚶 Start Walk Session';
+          walkBtnEl.classList.toggle('gold', state.walkActive);
+          walkBtnEl.classList.toggle('soft', !state.walkActive);
+        }
         syncSpawnMarkers();
         updatePlayerMarkerOnMap();
         updateRadarArrows();
@@ -2263,25 +2331,30 @@ function plantSVG(potState){
 /* ===================== POT RENDERING (fixed shelf anchor, tap-to-inspect) ===================== */
 function potVisualInner(potState){
   const ready = potState && (potState.progress >= SEED_TYPES[potState.type].threshold);
-  // BUG FIX (pot growth layering): the pot body/rim SVG previously carried an explicit
-  // z-index:2 while the plant wrapper below it had no z-index at all (auto/0). Per CSS stacking
-  // rules, a positioned element with a higher z-index paints ON TOP of a sibling with z-index:auto
-  // regardless of DOM order or visual overlap — so at low/mid growth fractions the pot's front
-  // wall (the "front lip") was fully occluding the stem/sprout beneath it, and the plant only
-  // became visible once it grew tall enough to clear the pot's total container height entirely.
-  // Fix: the plant wrapper now carries a HIGHER z-index (3) than the pot graphic (2), so the
-  // stem/leaves/flower always render in front of the pot's front lip at every growth stage, while
-  // the soil-rim ellipse (drawn first, inside the same pot <svg>) still visually "holds" the base
-  // of the stem since the stem's own bottom point is anchored at/below that rim line.
+  // BUG FIX (pot growth layering, refined): putting the whole plant in front of the whole pot
+  // (an earlier pass) fixed the pot fully hiding the plant at early growth, but overcorrected —
+  // the bottom of the stem then visibly floated ON TOP of the pot's soil/rim instead of looking
+  // like it emerges from inside it. Correct three-layer stacking instead: (1) BACK layer — the
+  // tall front wall, shadow, rim and soil, all behind the plant, so the wall can never hide the
+  // stem/leaves/flower at any growth stage; (2) the PLANT in the middle; (3) a FRONT layer that
+  // re-draws ONLY the rim + soil silhouette (no tall wall) on top of the plant. Because layer 3 is
+  // pixel-identical to the rim/soil already drawn in layer 1, it seams invisibly and simply "hugs"
+  // back over whatever part of the stem's base falls within the opening — tucking the bottom of
+  // the plant into the pot — while anything taller than the rim (the growing stem/leaves/flower)
+  // still reads clearly in front, since it extends outside that ellipse's silhouette.
   return `
     ${ready ? `<div class="ready-badge">✨ Ready!</div>` : ''}
-    <div style="position:absolute; bottom:22px; z-index:3;">${plantSVG(potState)}</div>
-    <svg width="78" height="50" viewBox="0 0 88 58" style="position:relative; z-index:2;">
+    <svg width="78" height="50" viewBox="0 0 88 58" style="position:absolute; left:50%; bottom:0; transform:translateX(-50%); z-index:1;">
       <ellipse cx="44" cy="14" rx="34" ry="7" fill="#3a2a1c" opacity="0.18"/>
       <path d="M10 12 L18 54 Q44 60 70 54 L78 12 Z" fill="var(--terracotta)" stroke="var(--terracotta-dark)" stroke-width="2" stroke-linejoin="round"/>
       <ellipse cx="44" cy="12" rx="34" ry="8" fill="var(--terracotta-rim)" stroke="var(--terracotta-dark)" stroke-width="2"/>
       <ellipse cx="44" cy="12" rx="27" ry="5" fill="#5C4028"/>
       <path d="M18 30 Q44 34 70 30" stroke="var(--terracotta-dark)" stroke-width="1.4" fill="none" opacity="0.5"/>
+    </svg>
+    <div style="position:absolute; left:50%; bottom:22px; transform:translateX(-50%); z-index:2;">${plantSVG(potState)}</div>
+    <svg width="78" height="50" viewBox="0 0 88 58" style="position:absolute; left:50%; bottom:0; transform:translateX(-50%); z-index:3; pointer-events:none;" aria-hidden="true">
+      <ellipse cx="44" cy="12" rx="34" ry="8" fill="var(--terracotta-rim)" stroke="var(--terracotta-dark)" stroke-width="2"/>
+      <ellipse cx="44" cy="12" rx="27" ry="5" fill="#5C4028"/>
     </svg>
   `;
 }
@@ -2429,7 +2502,13 @@ function renderMap(){
   const locBtn = state.mapLocation.status !== 'granted' ? `<button class="pill-btn primary" data-action="enable-location">Enable Location</button>` : '';
   const compassSupported = typeof DeviceOrientationEvent !== 'undefined';
   const compassBtn = (compassSupported && !compassEnabled) ? `<button class="pill-btn soft" data-action="enable-compass">🧭 Enable Compass</button>` : '';
-  const walkBtn = `<button class="pill-btn ${state.walkActive ? 'gold' : 'soft'}" data-action="toggle-walk">${state.walkActive ? '⏹️ Stop Walk' : '🚶 Start Walk'}</button>`;
+  // BUG FIX (walk button state toggle): this button's label/style already correctly reflect
+  // state.walkActive whenever this markup string gets freshly rendered — the actual bug was that
+  // render()'s "stayingOnMap" fast-path (used whenever the map tab is already mounted) skipped
+  // regenerating this markup entirely, so the button visually never switched labels while the
+  // player stayed on the Map tab and tapped it (see the render() fix near mapLocBtnWrap below).
+  // Also gave it a stable id so that fast-path can update it directly without a full re-render.
+  const walkBtn = `<button class="pill-btn ${state.walkActive ? 'gold' : 'soft'}" id="walkSessionBtn" data-action="toggle-walk">${state.walkActive ? '⏹️ End Walk Session' : '🚶 Start Walk Session'}</button>`;
   return `
     <div class="screen-title">Trail Map</div>
     <div class="screen-sub">Your view follows you, showing about 200m around your position. Radar arrows on the edge point toward seeds further out.</div>
@@ -3065,7 +3144,11 @@ mapWorldTimer = setInterval(mapWorldTick, MAP_TICK_MS);
 // Reconcile against Date.now() whenever the app regains focus/visibility — handles the device
 // sleeping, the tab being backgrounded, or the clock otherwise drifting while we were away.
 window.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible'){ mapWorldTick(); ensureLocationTrackingActive(); if(state.walkActive && !wakeLockSentinel) requestWakeLock(); }
+  // BUG FIX (meters "locked" behind an active walk session): the wake lock the Map tab now holds
+  // independently (see render()) is auto-released by the browser whenever the page goes hidden,
+  // same as the walk-session one always was — so reacquiring it here needs the same "or the map
+  // tab is open" condition as everywhere else this lock is requested, not just state.walkActive.
+  if(document.visibilityState === 'visible'){ mapWorldTick(); ensureLocationTrackingActive(); if((state.walkActive || state.tab === 'map') && !wakeLockSentinel) requestWakeLock(); }
   else { flushMapStateNow(); } // going hidden (tab switch, app backgrounded, about to close) — commit the latest layout now
 });
 window.addEventListener('focus', ()=>{ mapWorldTick(); ensureLocationTrackingActive(); });
