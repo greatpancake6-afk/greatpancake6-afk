@@ -792,8 +792,8 @@ const COLLECT_RADIUS_M = 20;      // player must be within 20m of a seed to harv
 const GPS_JITTER_BUFFER_M = 8;    // small grace margin for noisy GPS readings near the edge
 const DEMO_CENTER = { lat: 49.2827, lon: -123.1207 };
 const VIEWPORT_RADIUS_M = 100;    // ~200m window shown around the player at once
-const AMBIENT_RADIUS_M = 500;     // ambient (both-pool) seeds spawn up to 500m from the player
-const SPECIAL_RADIUS_M = 1200;    // map-only special seeds can spawn up to 1200m out (longer walks)
+const AMBIENT_RADIUS_M = 500;     // ambient/shop-pool seeds spawn up to 500m from the player
+const SPECIAL_RADIUS_M = 1500;    // map-only special seeds can spawn up to 1500m out (longer walks)
 const POI_FETCH_RADIUS_M = Math.max(AMBIENT_RADIUS_M, SPECIAL_RADIUS_M); // covers both spawn kinds
 const POI_REFETCH_THRESHOLD_M = 300; // re-query Overpass once the player has wandered this far from the last fetch center
 
@@ -811,14 +811,10 @@ const POI_REFETCH_THRESHOLD_M = 300; // re-query Overpass once the player has wa
 const POSITION_EMA_ALPHA = 0.35;  // how quickly the filtered position chases a new raw fix (0-1)
 const GPS_NOISE_FLOOR_M = 6;      // fixes closer than this to the current filtered point are jitter, not motion
 
-// BUG FIX (glitchy far-away seeds): pickSafeSpawnPoint()/clampedPointNear() already clamp each
-// spawn kind to its own radius (500m ambient / 1200m special) at generation time, but this is a
-// second, independent, absolute ceiling checked again right before ANY spawn is committed to
-// state -- regardless of kind, regardless of which code path produced the coordinate, and
-// regardless of which reference point ("current" vs a since-moved player) it was generated
-// against. Any candidate farther than this from the player's position at commit time is dropped
-// and re-rolled rather than ever reaching the map, closing off every future path (not just the
-// ones we've already reasoned through) that could otherwise let a wild coordinate slip through.
+// Absolute, kind-agnostic ceiling every spawn coordinate is checked against right before it's
+// committed to state, on top of each kind's own [minM,maxM] radius (500m ambient / 1500m special)
+// enforced at generation time. Any candidate beyond this, from any code path, is dropped and
+// re-rolled in a loop (see pickGuardedSafeSpawnPoint) until a valid point is found.
 const ABSOLUTE_MAX_SPAWN_DISTANCE_M = 1500;
 
 // Ambient seeds: always 2-3 alive at once, drawn from the "Both" (shop+map) pool, weighted so
@@ -1462,6 +1458,11 @@ function closeChainedModal(){
 /* ===================== MAP: geolocation, notifications, spawns, Leaflet lifecycle ===================== */
 let leafletMapInstance = null;
 let playerMarker = null;
+let playerMarkerAnimFrame = null; // requestAnimationFrame handle for the marker's smooth glide between fixes
+let playerMarkerAnimFrom = null;
+let playerMarkerAnimTo = null;
+let playerMarkerAnimStart = 0;
+const PLAYER_MARKER_ANIM_MS = 900; // glide toward each new fix over this long instead of snapping to it
 let spawnMarkers = {};       // uid -> Leaflet marker
 let poiMarkers = [];
 let safetyZones = []; // schools/hospitals/residential exclusion buffer, fetched per map session
@@ -1471,13 +1472,32 @@ let watchId = null;
 let mapGeneration = 0;       // bumped on every init/destroy so stale async work (OSM fetch) is ignored
 let lastGeoUpdateTs = 0;
 const GEO_UPDATE_MIN_INTERVAL_MS = 3000; // throttle heavier map work (recenter/marker move) to preserve battery
+// Robust filtering at the geolocation watch itself, upstream of everything else: a raw fix
+// reporting worse accuracy than GEO_MAX_ACCURACY_M is treated as unreliable noise and skipped
+// outright — it never even reaches state.mapLocation — unless we haven't accepted a usable fix in
+// a while, in which case it's let through anyway so tracking doesn't stall indefinitely (e.g.
+// indoors/urban-canyon conditions where only poor fixes are ever available).
+let lastAcceptedFixTs = 0;
+const GEO_MAX_ACCURACY_M = 35;
+const GEO_STALE_FIX_MS = 12000;
 let mapWorldTimer = null;    // world-tick interval handle (expiration / respawn / special spawns)
 let mapStateLoaded = false;  // guards against ticking before persisted state has loaded
 let inRangeSpawnUid = null;  // uid of the spawn currently within COLLECT_RADIUS_M, if any
 
 let compassEnabled = false;
 let compassHandler = null;
-let deviceHeading = 0;
+let deviceHeading = 0;         // last raw, normalized (0-360) heading — used anywhere a plain compass reading is needed
+let smoothedHeadingDeg = null; // unwrapped/continuous — can exceed 0-360 or go negative, on purpose (see below)
+const HEADING_SMOOTHING_ALPHA = 0.25; // low-pass filter strength: lower = smoother/slower, higher = snappier
+
+// Shortest signed angular delta from `from` to `to`, both in degrees — result is always in
+// (-180, 180]. This is the key to seamless rotation: CSS transform:rotate() interpolates the raw
+// numbers it's given, so naively feeding it a normalized 0-360 heading makes the arrow visually
+// whip almost all the way around every time the compass crosses the 0°/360° boundary (e.g. 358°
+// to 3° previously animated through 357,356,...4,3 — a 355° spin — instead of a smooth 5° turn).
+function shortestAngleDelta(from, to){
+  return (((to - from + 180) % 360) + 360) % 360 - 180;
+}
 
 function mapLocationText(){
   const loc = state.mapLocation;
@@ -1497,6 +1517,12 @@ function requestLocation(){
     if(watchId !== null) navigator.geolocation.clearWatch(watchId); // never stack multiple watches
     watchId = navigator.geolocation.watchPosition(
       pos=>{
+        const accuracy = typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null;
+        const nowTs = Date.now();
+        if(accuracy !== null && accuracy > GEO_MAX_ACCURACY_M && (nowTs - lastAcceptedFixTs) < GEO_STALE_FIX_MS){
+          return; // low-quality fix and we still have a recent good one — ignore it entirely rather than let it jerk the player position around
+        }
+        lastAcceptedFixTs = nowTs;
         const hadRealFixBefore = state.mapLocation.status === 'granted';
         state.mapLocation = {status:'granted', lat:pos.coords.latitude, lon:pos.coords.longitude};
         // Cheap UI updates happen every time...
@@ -1549,13 +1575,27 @@ function sendLocalNotification(title, body){
 }
 
 /* ---- Compass / directional heading ---- */
-function updatePlayerHeading(heading){
-  deviceHeading = heading;
+function updatePlayerHeading(rawHeading){
+  const normalized = ((rawHeading % 360) + 360) % 360;
+  deviceHeading = normalized;
+  if(smoothedHeadingDeg === null){
+    smoothedHeadingDeg = normalized; // first reading — nothing to interpolate from yet
+  } else {
+    // Take the shortest path from where we currently are (mod 360) to the new raw reading, then
+    // only blend in a fraction of that step (low-pass filter) to damp raw sensor jitter — and
+    // keep accumulating on the UNWRAPPED value so the applied rotation never has to jump back
+    // across the 0°/360° seam.
+    const delta = shortestAngleDelta(((smoothedHeadingDeg % 360) + 360) % 360, normalized);
+    smoothedHeadingDeg += delta * HEADING_SMOOTHING_ALPHA;
+  }
   if(!playerMarker) return;
   const el = playerMarker.getElement ? playerMarker.getElement() : null;
   if(!el) return;
   const arrow = el.querySelector('.map-player-arrow');
-  if(arrow) arrow.style.transform = `rotate(${heading}deg)`;
+  // The element's own CSS transition (transform 0.25s ease-out) handles the final frame-to-frame
+  // smoothing on top of this — now that the value it's given is continuous, that transition can
+  // no longer be tricked into spinning the long way around.
+  if(arrow) arrow.style.transform = `rotate(${smoothedHeadingDeg}deg)`;
 }
 function handleOrientationEvent(e){
   let heading = null;
@@ -1564,7 +1604,7 @@ function handleOrientationEvent(e){
   } else if(e.alpha !== null && e.alpha !== undefined){
     heading = 360 - e.alpha; // approximate compass heading from device orientation
   }
-  if(heading !== null && !isNaN(heading)) updatePlayerHeading(((heading % 360) + 360) % 360);
+  if(heading !== null && !isNaN(heading)) updatePlayerHeading(heading);
 }
 function attachCompassListener(){
   if(compassHandler) return;
@@ -1683,11 +1723,10 @@ function spawnAmbientSeed(forcedTierKey){
   if(!key) key = DEX_ORDER.find(k=> SEED_TYPES[k].category==='both'); // defensive fallback, should never trigger
   if(!key) return;
   const pt = pickGuardedSafeSpawnPoint(player, 15, AMBIENT_RADIUS_M);
-  if(!pt) return; // guard exhausted its attempts — skip this cycle rather than risk a far-away seed
   addSpawnToState(key, pt.lat, pt.lon, 'ambient');
 }
 // Special timed seeds pull ONLY from the "Map Only" category pool — rarer tiers spawn less often.
-// Special spawns reach further out (up to 1200m) to encourage a longer walk.
+// Special spawns reach further out (up to 1500m) to encourage a longer walk.
 function spawnSpecialSeed(){
   const player = getPlayerCoords();
   const tierKey = pickTier(SPECIAL_TIER_WEIGHTS);
@@ -1695,7 +1734,6 @@ function spawnSpecialSeed(){
   if(!key) key = DEX_ORDER.find(k=> SEED_TYPES[k].category==='map');
   if(!key) return;
   const pt = pickGuardedSafeSpawnPoint(player, 40, SPECIAL_RADIUS_M);
-  if(!pt) return; // guard exhausted its attempts — skip this cycle rather than risk a far-away seed
   addSpawnToState(key, pt.lat, pt.lon, 'special');
   const type = SEED_TYPES[key];
   const label = type.rarityLabel.charAt(0) + type.rarityLabel.slice(1).toLowerCase();
@@ -1707,17 +1745,14 @@ function pickSpeciesForCategoryTier(category, tierKey){
   if(!candidates.length) return null;
   return candidates[Math.floor(Math.random()*candidates.length)];
 }
-// BUG FIX (glitchy far-away seeds): pickSafeSpawnPoint() already targets [minM,maxM] for its own
-// spawn kind, but this is the final, absolute, kind-agnostic checkpoint every candidate must clear
-// before it's allowed to become a real spawn — see ABSOLUTE_MAX_SPAWN_DISTANCE_M above for why a
-// second independent gate here (rather than trusting the generator alone) matters. Any candidate
-// whose real haversine distance from the player exceeds the ceiling is instantly dropped and the
-// point is re-rolled from scratch. If it's still somehow out of range after every attempt (e.g. an
-// unlucky run of POI-anchored candidates near the very edge of the radius), the point is clamped
-// straight back onto the boundary circle along its own bearing from the player rather than either
-// being accepted as-is or silently skipped — so a spawn always still appears this cycle, and it is
-// mathematically guaranteed to never sit beyond the cap.
-const FAR_SPAWN_GUARD_MAX_ATTEMPTS = 6;
+// Every spawn coordinate — ambient or special, POI-anchored or fully organic — is verified here
+// against the real haversine distance from the player before it's ever allowed to become a live
+// spawn. A candidate beyond the limit is instantly dismissed and re-rolled from scratch, in a loop,
+// until a valid point is found; SPAWN_REROLL_HARD_CAP only exists so a pathological edge case can
+// never hang the tab — pickSafeSpawnPoint()'s own math (offsetLatLon's MIN_COS_LAT floor +
+// clampedPointNear's own verification) already keeps the overwhelming majority of candidates valid
+// on the very first try, so that cap is never expected to be hit in practice.
+const SPAWN_REROLL_HARD_CAP = 200;
 function clampPointToRadius(center, pt, maxM){
   const d = haversineMeters(center.lat, center.lon, pt.lat, pt.lon);
   if(d <= maxM) return pt;
@@ -1726,16 +1761,13 @@ function clampPointToRadius(center, pt, maxM){
 }
 function pickGuardedSafeSpawnPoint(center, minM, maxM){
   const cappedMax = Math.min(maxM, ABSOLUTE_MAX_SPAWN_DISTANCE_M);
-  let lastPt = null, lastD = Infinity;
-  for(let attempt=0; attempt<FAR_SPAWN_GUARD_MAX_ATTEMPTS; attempt++){
+  for(let attempt=0; attempt<SPAWN_REROLL_HARD_CAP; attempt++){
     const pt = pickSafeSpawnPoint(center, minM, cappedMax);
-    const d = haversineMeters(center.lat, center.lon, pt.lat, pt.lon);
-    if(d <= ABSOLUTE_MAX_SPAWN_DISTANCE_M) return pt;
-    console.error('Flora spawn guard: dropped an out-of-range candidate', {distM: Math.round(d), attempt});
-    if(d < lastD){ lastD = d; lastPt = pt; } // keep the closest-to-valid candidate seen, in case every attempt fails
+    if(haversineMeters(center.lat, center.lon, pt.lat, pt.lon) <= cappedMax) return pt;
   }
-  console.error('Flora spawn guard: exhausted retries, clamping to boundary', {distM: Math.round(lastD)});
-  return clampPointToRadius(center, lastPt, cappedMax);
+  // Never realistically reached — see the note above — but if it ever were, clamp straight onto
+  // the boundary rather than either accepting an out-of-range point or spawning nothing at all.
+  return clampPointToRadius(center, pickSafeSpawnPoint(center, minM, cappedMax), cappedMax);
 }
 // BUG FIX: seeds "showing up from way too far away" — ambient seeds are only ever allowed to exist
 // within AMBIENT_RADIUS_M (500m, strict) of the player's real position. This is what catches and
@@ -2154,7 +2186,7 @@ async function initLeafletMap(){
     // Real OSM POIs (cafes/parks/buildings/restaurants) softly bias where new spawns land, and
     // are also shown as decorative context markers. Safety zones (schools/hospitals/residential)
     // are fetched in parallel and are NEVER shown — they only gate spawn placement, see
-    // isSafeSpawnPoint(). Both cover the full 1200m special-spawn radius.
+    // isSafeSpawnPoint(). Both cover the full 1500m special-spawn radius.
     const [pois, zones] = await Promise.all([ loadNearbyPOIs(center), fetchSafetyZones(center) ]);
     if(myGeneration !== mapGeneration || !leafletMapInstance) return; // player left the tab mid-fetch
     state.mapPOIs = pois;
@@ -2179,6 +2211,8 @@ function destroyLeafletMap(){
     if(leafletMapInstance){ leafletMapInstance.remove(); leafletMapInstance = null; }
     Object.values(spawnMarkers).forEach(m=>{ try{ m.remove(); }catch(e){ /* map already torn down, nothing to clean up */ } });
     poiMarkers.forEach(m=>{ try{ m.remove(); }catch(e){ /* map already torn down, nothing to clean up */ } });
+    if(playerMarkerAnimFrame){ cancelAnimationFrame(playerMarkerAnimFrame); playerMarkerAnimFrame = null; }
+    smoothedHeadingDeg = null; // reset the continuous rotation accumulator so the next marker's fresh paint and first smoothed update never disagree
     playerMarker = null; spawnMarkers = {}; poiMarkers = [];
     Object.values(radarMeterAnim).forEach(anim=>{ if(anim.timer) clearTimeout(anim.timer); });
     radarArrowEls = {};
@@ -2190,8 +2224,28 @@ function destroyLeafletMap(){
 }
 function updatePlayerMarkerOnMap(){
   if(!leafletMapInstance || !playerMarker) return;
-  const c = getPlayerCoords();
-  playerMarker.setLatLng([c.lat, c.lon]);
+  const target = getPlayerCoords();
+  const current = playerMarker.getLatLng();
+  if(current.lat === target.lat && current.lng === target.lon) return; // already there — nothing to animate
+  if(playerMarkerAnimFrame) cancelAnimationFrame(playerMarkerAnimFrame);
+  // Glide from wherever the marker visually is right now (which may itself be mid-animation)
+  // toward the new fix over PLAYER_MARKER_ANIM_MS, instead of Leaflet's default instant snap —
+  // this is what makes the on-screen arrow move seamlessly across the map rather than teleporting
+  // a few meters every time a throttled GPS update lands.
+  playerMarkerAnimFrom = { lat: current.lat, lon: current.lng };
+  playerMarkerAnimTo = target;
+  playerMarkerAnimStart = performance.now();
+  const step = (now)=>{
+    const t = Math.min(1, (now - playerMarkerAnimStart) / PLAYER_MARKER_ANIM_MS);
+    const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic — starts fast, settles gently into place
+    playerMarker.setLatLng([
+      playerMarkerAnimFrom.lat + (playerMarkerAnimTo.lat - playerMarkerAnimFrom.lat) * eased,
+      playerMarkerAnimFrom.lon + (playerMarkerAnimTo.lon - playerMarkerAnimFrom.lon) * eased
+    ]);
+    if(t < 1) playerMarkerAnimFrame = requestAnimationFrame(step);
+    else playerMarkerAnimFrame = null;
+  };
+  playerMarkerAnimFrame = requestAnimationFrame(step);
 }
 function addSpawnMarker(spawn){
   if(!leafletMapInstance) return;
