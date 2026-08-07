@@ -212,12 +212,16 @@
        the buttons edge-to-edge horizontally with zero space between them — moving the same
        padding values onto each button below (instead of the container) means every pixel of the
        bar's height and width now belongs to exactly one button, with the same visual spacing.
-       Horizontal edge padding stays here since it's outside all buttons either way. */
+       Horizontal edge padding stays here since it's outside all buttons either way.
+       gap and justify-content are pinned explicitly (rather than left to their flex defaults) so
+       the four flex:1 buttons always tile edge-to-edge with zero space between or around them —
+       no layout change could ever leave room for a stray/phantom element to render in that space. */
     padding: 0 4px;
     gap: 0;
+    justify-content: stretch;
   }
   .nav-btn{
-    position:relative; flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    position:relative; flex:1 1 0%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
     background:none; border:none; cursor:pointer; color:var(--ink-soft);
     padding: 10px 0 calc(10px + env(safe-area-inset-bottom));
     margin:0; min-height:46px;
@@ -797,19 +801,13 @@ const SPECIAL_RADIUS_M = 1500;    // map-only special seeds can spawn up to 1500
 const POI_FETCH_RADIUS_M = Math.max(AMBIENT_RADIUS_M, SPECIAL_RADIUS_M); // covers both spawn kinds
 const POI_REFETCH_THRESHOLD_M = 300; // re-query Overpass once the player has wandered this far from the last fetch center
 
-// BUG FIX (radar/distance meter occasionally ticking backward): raw consumer-grade GPS fixes
-// jitter by several meters fix-to-fix even while standing still or walking in a straight line, and
-// the old radar meter recomputed its "distance to spawn" straight off the raw fix every tick — so
-// a wobble toward the spawn between two fixes could make the on-screen number count DOWN for a
-// beat even though the player was net moving away. getSmoothedPlayerCoords() (below, near the
-// other geo helpers) low-pass-filters the raw fix through an exponential moving average and,
-// below GPS_NOISE_FLOOR_M, ignores the update entirely (treats it as pure jitter, not real
-// motion) -- so any DISPLAYED distance/vector metric derived from it can only change once the
-// player's underlying position has genuinely, measurably moved. Gameplay-critical checks (e.g.
-// "are you within COLLECT_RADIUS_M to harvest") intentionally keep using the raw, unsmoothed fix
-// via getPlayerCoords() so collection stays accurate to the player's real position.
-const POSITION_EMA_ALPHA = 0.35;  // how quickly the filtered position chases a new raw fix (0-1)
-const GPS_NOISE_FLOOR_M = 6;      // fixes closer than this to the current filtered point are jitter, not motion
+// The distance meter reads the player's position straight from state.mapLocation (via
+// getPlayerCoords(), the single source of truth also used for harvesting) — no separate smoothed
+// copy, no dead zone that swallows small real movements. GPS noise is filtered upstream, at the
+// watchPosition callback itself (see GEO_MAX_ACCURACY_M), and the only smoothing left downstream
+// is METER_HYSTERESIS_M on the displayed number's direction (see stepMeterLabel), so a genuine
+// single meter of movement is always reflected immediately, while a GPS-noise wobble too small to
+// be a real direction change doesn't visibly flicker.
 
 // Absolute, kind-agnostic ceiling every spawn coordinate is checked against right before it's
 // committed to state, on top of each kind's own [minM,maxM] radius (500m ambient / 1500m special)
@@ -880,7 +878,7 @@ function organicPointNear(center, minM, maxM){
 function clampedPointNear(center, minM, maxM){
   for(let attempt=0; attempt<5; attempt++){
     const pt = organicPointNear(center, minM, maxM);
-    if(haversineMeters(center.lat, center.lon, pt.lat, pt.lon) <= maxM * 1.05) return pt;
+    if(haversineMeters(center.lat, center.lon, pt.lat, pt.lon) <= maxM) return pt;
   }
   // Deterministic, guaranteed-safe fallback if something is still off after 5 tries.
   return offsetLatLon(center, Math.min(maxM*0.6, Math.max(minM, 20)), Math.random()*Math.PI*2);
@@ -1062,28 +1060,6 @@ async function maybeRefreshPOIs(center){
 function getPlayerCoords(){
   if(state.mapLocation.status === 'granted') return {lat: state.mapLocation.lat, lon: state.mapLocation.lon};
   return DEMO_CENTER;
-}
-// Low-pass-filtered player position for DISPLAY/metric purposes only (see BUG FIX note near
-// POSITION_EMA_ALPHA above). Not used for gameplay-critical checks like harvest-radius.
-let smoothedPlayerCoords = null;
-function getSmoothedPlayerCoords(){
-  const raw = getPlayerCoords();
-  if(!Number.isFinite(raw.lat) || !Number.isFinite(raw.lon)) return raw;
-  if(!smoothedPlayerCoords){ smoothedPlayerCoords = {lat: raw.lat, lon: raw.lon}; return smoothedPlayerCoords; }
-  const movedM = haversineMeters(smoothedPlayerCoords.lat, smoothedPlayerCoords.lon, raw.lat, raw.lon);
-  // A jump larger than the ambient spawn radius means a real teleport (GPS lock just acquired,
-  // demo-center fallback swapped for a real fix, etc.) rather than gradual walking motion --
-  // snap instantly instead of slowly crawling the filtered point across a huge, meaningless delta.
-  if(movedM > AMBIENT_RADIUS_M){ smoothedPlayerCoords = {lat: raw.lat, lon: raw.lon}; return smoothedPlayerCoords; }
-  // Below the noise floor, treat this fix as jitter and leave the filtered position untouched --
-  // this is what stops the on-screen distance meter from ever ticking backward on a stationary
-  // or steadily-approaching/receding player.
-  if(movedM < GPS_NOISE_FLOOR_M) return smoothedPlayerCoords;
-  smoothedPlayerCoords = {
-    lat: smoothedPlayerCoords.lat + (raw.lat - smoothedPlayerCoords.lat) * POSITION_EMA_ALPHA,
-    lon: smoothedPlayerCoords.lon + (raw.lon - smoothedPlayerCoords.lon) * POSITION_EMA_ALPHA
-  };
-  return smoothedPlayerCoords;
 }
 function haversineMeters(lat1,lon1,lat2,lon2){
   const R = 6371000;
@@ -1537,16 +1513,24 @@ function requestLocation(){
         // reconciled onto the player's real coordinates immediately, instead of waiting up to
         // GEO_UPDATE_MIN_INTERVAL_MS or the next 20s world-tick to notice.
         if(!hadRealFixBefore && mapStateLoaded) mapWorldTick();
-        // ...but recentering the map / touching markers on every subsequent fix is throttled to
+        // Distance meter and the player marker's glide target update on EVERY accepted fix,
+        // unthrottled — these are cheap, purely-local DOM/state updates, so gating them behind the
+        // battery throttle below was exactly what caused the meter's "dead zone" (having to walk
+        // several meters before anything visibly moved) and the marker's start-stop stutter
+        // (a fresh multi-meter jump only every few seconds, instead of a steady glide).
+        if(leafletMapInstance){
+          updatePlayerMarkerOnMap();
+          updateRadarArrows();
+          updateProximityState();
+        }
+        // Recentering the map viewport and re-querying Overpass for nearby POIs are comparatively
+        // expensive (map pan/zoom repaint, network requests), so those alone stay throttled to
         // save battery.
         const now = Date.now();
         if(now - lastGeoUpdateTs < GEO_UPDATE_MIN_INTERVAL_MS) return;
         lastGeoUpdateTs = now;
         if(leafletMapInstance){
           leafletMapInstance.setView([pos.coords.latitude, pos.coords.longitude], leafletMapInstance.getZoom(), {animate:true});
-          updatePlayerMarkerOnMap();
-          updateRadarArrows();
-          updateProximityState();
           maybeRefreshPOIs({lat: pos.coords.latitude, lon: pos.coords.longitude});
         }
       },
@@ -1681,13 +1665,62 @@ function flushMapStateNow(){
     window.storage.set('flora_map_state', mapStateSnapshot(), false);
   }catch(e){ console.error('Flora map state flush error:', e); }
 }
+// Structural validity check for one spawn record: every field a spawn is ever read by must be
+// exactly the right type/shape, or it's rejected outright. This exists specifically so a record
+// hydrated from storage (a different session, a different location, a different — possibly much
+// older — build of the game, or manually-edited/corrupted localStorage) can never be trusted just
+// because it *looks* like an object with the right keys.
+function isValidSpawnRecord(s){
+  if(!s || typeof s !== 'object') return false;
+  if(typeof s.uid !== 'string' || !s.uid) return false;
+  if(typeof s.key !== 'string' || !SEED_TYPES[s.key]) return false;
+  if(s.kind !== 'ambient' && s.kind !== 'special') return false;
+  if(!Number.isFinite(s.lat) || s.lat < -90 || s.lat > 90) return false;
+  if(!Number.isFinite(s.lon) || s.lon < -180 || s.lon > 180) return false;
+  if(!Number.isFinite(s.spawnedAt) || !Number.isFinite(s.expiresAt)) return false;
+  return true;
+}
+// Runs immediately on hydration, before anything else ever touches state.mapSpawns. Deliberately
+// uses Number.isFinite() rather than a bare numeric comparison: `NaN > 500` evaluates to `false`
+// in JavaScript, so a corrupted lat/lon (undefined, a string, NaN from a bad JSON.parse, a field
+// dropped by a future/past schema change) would otherwise silently pass every ordinary "is this
+// too far?" check instead of being caught — this closes that gap at the door, before distance is
+// ever computed against it.
+function sanitizeSpawnShapes(spawns){
+  if(!Array.isArray(spawns)) return [];
+  return spawns.filter(isValidSpawnRecord);
+}
+// Distance-based sweep, run every world tick: drops any spawn — ambient OR special, freshly
+// generated or hydrated from a previous session — that is farther from the player's CURRENT real
+// position than its own kind's radius allows, AND independently re-checks it against the
+// absolute, kind-agnostic ceiling on top. Two spawn-generation-time safeguards already exist
+// (pickGuardedSafeSpawnPoint's reroll loop, and MIN_COS_LAT preventing the coordinate math itself
+// from ever exploding) — this is what catches everything upstream of generation instead: a
+// player who traveled to a new city between sessions, or a record hydrated from a much older
+// build that predates today's spawn-radius rules entirely. Only runs once we trust the player's
+// position (a real 'granted' GPS fix), so it never fights the DEMO_CENTER fallback before a lock
+// is acquired.
+function sweepOutOfBoundsSpawns(){
+  if(state.mapLocation.status !== 'granted') return;
+  const player = getPlayerCoords();
+  const outOfBounds = state.mapSpawns.filter(s=>{
+    const d = haversineMeters(player.lat, player.lon, s.lat, s.lon);
+    if(!Number.isFinite(d)) return true; // a corrupted coordinate that somehow still reached this point — drop it
+    const kindLimit = s.kind === 'special' ? SPECIAL_RADIUS_M : AMBIENT_RADIUS_M;
+    return d > kindLimit || d > ABSOLUTE_MAX_SPAWN_DISTANCE_M;
+  });
+  if(!outOfBounds.length) return;
+  outOfBounds.forEach(s=> removeSpawnMarker(s.uid));
+  const badUids = new Set(outOfBounds.map(s=>s.uid));
+  state.mapSpawns = state.mapSpawns.filter(s=> !badUids.has(s.uid));
+}
 async function loadMapPersistence(){
   try{
     if(window.storage){
       const res = await window.storage.get('flora_map_state', false);
       if(res && res.value){
         const data = JSON.parse(res.value);
-        state.mapSpawns = Array.isArray(data.spawns) ? data.spawns : [];
+        state.mapSpawns = sanitizeSpawnShapes(data.spawns);
         state.mapRespawnQueue = Array.isArray(data.respawnQueue) ? data.respawnQueue : [];
         state.nextSpecialSpawnAt = typeof data.nextSpecialSpawnAt === 'number' ? data.nextSpecialSpawnAt : null;
         state.ambientTargetCount = data.ambientTargetCount || null;
@@ -1701,7 +1734,7 @@ async function loadMapPersistence(){
     state.nextSpecialSpawnAt = Date.now() + randBetween(SPECIAL_INTERVAL_MIN_MS, SPECIAL_INTERVAL_MAX_MS);
   }
   mapStateLoaded = true;
-  mapWorldTick(); // reconcile immediately: prune anything that expired while the app was closed
+  mapWorldTick(); // reconcile immediately: prune anything that expired, and sweep anything out-of-bounds, while the app was closed
 }
 
 /* ---- Wild seed spawning: organic placement (never snapped to POIs), category-aware, timed & expiring ---- */
@@ -1769,31 +1802,17 @@ function pickGuardedSafeSpawnPoint(center, minM, maxM){
   // the boundary rather than either accepting an out-of-range point or spawning nothing at all.
   return clampPointToRadius(center, pickSafeSpawnPoint(center, minM, cappedMax), cappedMax);
 }
-// BUG FIX: seeds "showing up from way too far away" — ambient seeds are only ever allowed to exist
-// within AMBIENT_RADIUS_M (500m, strict) of the player's real position. This is what catches and
-// corrects any seed that was originally spawned before a real GPS lock was available (using the
-// DEMO_CENTER fallback) or that the player has since walked far away from: it's purged here and
-// immediately replaced near wherever the player actually is now. Only runs once we trust the
-// coordinates (a real 'granted' GPS fix), so it never fights the DEMO_CENTER fallback itself.
-function relocateStaleAmbientSpawns(){
-  if(state.mapLocation.status !== 'granted') return;
-  const player = getPlayerCoords();
-  const stale = state.mapSpawns.filter(s=> s.kind==='ambient'
-    && haversineMeters(player.lat, player.lon, s.lat, s.lon) > AMBIENT_RADIUS_M);
-  if(!stale.length) return;
-  stale.forEach(s=>{ removeSpawnMarker(s.uid); });
-  const staleUids = new Set(stale.map(s=>s.uid));
-  state.mapSpawns = state.mapSpawns.filter(s=> !staleUids.has(s.uid));
-}
 // Keeps 2-3 ambient (common, "both"-pool) seeds alive within a strict 500m radius at all times.
 // - A totally empty board (first load, or everything lost at once) refills its FULL target
 //   instantly, guaranteed common+both species, so the player always sees exactly 2-3 seeds right
 //   away — never just one instant spawn with the rest silently stuck behind a cooldown.
 // - Losing a single seed out of an otherwise-populated board (collected, or expired on its own)
 //   still queues a normal 20-30 min respawn cooldown, unchanged from before.
+// (Out-of-bounds hygiene now lives in sweepOutOfBoundsSpawns(), called once per tick in
+// mapWorldTick() ahead of this — any deficit it creates is picked up by the counting below exactly
+// like a collected/expired seed would be.)
 function ambientMaintenance(){
   if(!mapStateLoaded) return;
-  relocateStaleAmbientSpawns();
   const now = Date.now();
   const stillPending = [];
   state.mapRespawnQueue.forEach(item=>{
@@ -1839,6 +1858,7 @@ function pruneExpiredSpawns(){
 function mapWorldTick(){
   try{
     if(!mapStateLoaded) return;
+    sweepOutOfBoundsSpawns();
     pruneExpiredSpawns();
     ambientMaintenance();
     maybeFireSpecialSpawn();
@@ -2031,14 +2051,12 @@ let radarArrowEls = {};   // uid -> { wrap, shape, iconEl, label, landmark }
 let radarMeterAnim = {};  // uid -> { current, target, dir, timer }
 const METER_STEP_MS = 40;        // how often the displayed number moves by 1
 const METER_SNAP_THRESHOLD_M = 60; // jumps bigger than this (e.g. first paint) snap instantly instead of crawling
-// BUG FIX (meter oscillating on sidestep/angled movement): getSmoothedPlayerCoords() already
-// filters GPS position noise, but even a genuinely-filtered position can still edge the raw
-// distance-to-spawn up and down by a meter or two while the player is moving on an angle relative
-// to the spawn (sidestepping, weaving around an obstacle, etc.) rather than walking straight
-// toward/away from it. Without this, that would show up as the displayed meter briefly counting
-// the "wrong" direction even though nothing about the underlying motion was actually erratic.
 // METER_HYSTERESIS_M requires a direction reversal to be at least this many meters before it's
 // accepted as real; anything smaller is held at the last committed value instead of flickering.
+// This is the ONLY smoothing applied to the meter's direction — it operates purely on the already
+// -accurate position from getPlayerCoords() (GPS noise is filtered upstream of that, at the
+// watchPosition callback itself), so a genuine, sustained meter of real movement is never held
+// back by a dead zone; only an ambiguous few-meter wobble against the current trend is.
 const METER_HYSTERESIS_M = 2;
 function stepMeterLabel(uid, el, rawTargetValue){
   if(!el || !Number.isFinite(rawTargetValue)) return;
@@ -2072,10 +2090,10 @@ function updateRadarArrows(){
   if(!layer || !scene) return;
   const w = scene.clientWidth, h = scene.clientHeight;
   if(!w || !h) return;
-  // Distance/bearing shown on the radar arrows use the SMOOTHED position (see BUG FIX above) so
-  // the meter can't tick backward on GPS jitter; actual gameplay checks elsewhere still use the
-  // raw fix via getPlayerCoords().
-  const player = getSmoothedPlayerCoords();
+  // Reads the same single source of truth as harvesting (getPlayerCoords() / state.mapLocation) —
+  // no separate smoothed copy, so a real 1-meter step always shows up immediately; see the note
+  // near METER_HYSTERESIS_M for how direction jitter is handled without introducing a dead zone.
+  const player = getPlayerCoords();
   if(!Number.isFinite(player.lat) || !Number.isFinite(player.lon)) return;
   const offScreen = state.mapSpawns.filter(s=> haversineMeters(player.lat, player.lon, s.lat, s.lon) > VIEWPORT_RADIUS_M);
   const liveUids = new Set(offScreen.map(s=>s.uid));
