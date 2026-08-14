@@ -79,16 +79,40 @@
   .screen-title{ font-size:24px; font-weight:800; color:var(--ink); margin: 4px 0 2px; }
   .screen-sub{ font-size:12.5px; color:var(--ink-soft); margin-bottom:12px; font-weight:600; }
 
-  /* ---------- Windowsill ---------- */
-  .windowsill{
+  /* ---------- Room scenes (8-stage garden progression) ---------- */
+  .garden-screen{ display:flex; flex-direction:column; min-height:100%; }
+  .room-scene{
     position:relative; border-radius:18px 18px 0 0; overflow:hidden;
     box-shadow: var(--shadow); border: 10px solid var(--wood); border-bottom:none;
-    transition: background 0.8s ease;
+    transition: background 0.8s ease; min-height:300px; display:flex; flex-direction:column;
   }
   .windowsill.weather-sunny{ background: linear-gradient(to bottom, #CFE3DE 0%, #CFE3DE 58%, #F5E9D3 100%); }
   .windowsill.weather-cloudy{ background: linear-gradient(to bottom, #C6CCC3 0%, #C6CCC3 58%, #E4DCC6 100%); }
   .windowsill.weather-rainy{ background: linear-gradient(to bottom, #93A9B3 0%, #93A9B3 58%, #CFC9B2 100%); }
   .windowsill.weather-snowy{ background: linear-gradient(to bottom, #E1EDF0 0%, #E1EDF0 58%, #F1EEE2 100%); }
+  .room-scene.theme-kitchen{    background: linear-gradient(to bottom, #F3DFC2 0%, #F3DFC2 55%, #E8C9A0 100%); }
+  .room-scene.theme-sunroom{    background: linear-gradient(to bottom, #FCE8B8 0%, #FCE8B8 55%, #F6D98A 100%); }
+  .room-scene.theme-patio{      background: linear-gradient(to bottom, #BFE0C9 0%, #BFE0C9 55%, #E7C9A6 100%); }
+  .room-scene.theme-shed{       background: linear-gradient(to bottom, #D9CBB3 0%, #D9CBB3 55%, #B99C74 100%); }
+  .room-scene.theme-greenhouse{ background: linear-gradient(to bottom, #C9E9DD 0%, #C9E9DD 55%, #9FD3C0 100%); }
+  .room-scene.theme-arboretum{  background: linear-gradient(to bottom, #A9D8A0 0%, #A9D8A0 55%, #6FAE68 100%); }
+  .room-scene.theme-ecodome{    background: linear-gradient(to bottom, #CFE0F5 0%, #CFE0F5 55%, #C9B8ED 100%); }
+  .room-scene-label{
+    position:absolute; top:10px; right:12px; z-index:3;
+    background:rgba(255,255,255,0.82); border-radius:999px; padding:4px 11px;
+    font-size:10.5px; font-weight:800; color:var(--ink);
+  }
+  .room-locked{ filter: grayscale(1) brightness(0.72); }
+  .room-lock-overlay{
+    position:absolute; inset:0; z-index:5; cursor:pointer;
+    background: rgba(20,20,20,0.28);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
+  }
+  .room-lock-icon{ font-size:34px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
+  .room-lock-text{
+    background:rgba(255,255,255,0.92); border-radius:999px; padding:5px 14px;
+    font-size:12px; font-weight:800; color:var(--ink);
+  }
   .window-mullion-v{ position:absolute; top:0; bottom:44px; left:50%; width:8px; margin-left:-4px; background:var(--wood); z-index:2; opacity:0.85; }
   .window-mullion-h{ position:absolute; left:0; right:0; top:38%; height:8px; background:var(--wood); z-index:2; opacity:0.85; }
   .weather-chip{
@@ -98,9 +122,12 @@
   }
   .sky-deco{ position:absolute; inset:0; z-index:0; }
   .weather-layer{ position:absolute; inset:0; z-index:1; pointer-events:none; }
-  .pots-row{ position:relative; display:flex; justify-content:space-between; align-items:flex-end; padding: 66px 10px 0; z-index:2; }
+  .pots-row{
+    position:relative; flex:1; display:flex; flex-wrap:wrap; align-content:center; justify-content:space-around;
+    padding: 84px 10px 10px; gap:10px 0; z-index:2;
+  }
   .shelf{
-    position:relative; height:36px;
+    position:relative; height:44px;
     background: linear-gradient(180deg, var(--wood) 0%, var(--wood) 55%, var(--wood-dark) 55%, var(--wood-dark) 100%);
     border-top:3px solid #7a5230; border-left:10px solid var(--wood); border-right:10px solid var(--wood); border-bottom:12px solid var(--wood-dark);
     border-radius:0 0 14px 14px;
@@ -115,9 +142,29 @@
     content:""; position:absolute; left:0; right:0; top:0; height:4px;
     background: rgba(0,0,0,0.22); filter: blur(2px);
   }
-  .pot-slot{ display:flex; flex-direction:column; align-items:center; width:31%; cursor:pointer; user-select:none; }
-  .pot-visual{ position:relative; height:114px; width:100%; display:flex; align-items:flex-end; justify-content:center; }
+  .pot-slot{ display:flex; flex-direction:column; align-items:center; width:var(--pot-w,31%); flex:0 0 var(--pot-w,31%); cursor:pointer; user-select:none; }
+  .pot-visual{ position:relative; height:148px; width:100%; display:flex; align-items:flex-end; justify-content:center; }
   .pot-visual svg{ overflow:visible; max-width:100%; height:auto; }
+  .room-capacity-note{ text-align:center; font-size:10.5px; font-weight:700; color:var(--ink-soft); margin:6px 0 2px; }
+
+  /* ---------- Room carousel: dots + arrows + swipeable track ---------- */
+  .room-dots{ display:flex; justify-content:center; align-items:center; gap:7px; margin-bottom:10px; }
+  .room-dot{
+    width:7px; height:7px; border-radius:50%; background:var(--line); cursor:pointer;
+    transition: all 0.2s ease; flex:0 0 auto;
+  }
+  .room-dot.active{ background:var(--moss); width:18px; border-radius:999px; }
+  .room-dot.locked{ background:#d8d0c0; }
+  .room-carousel{ display:flex; align-items:center; gap:4px; }
+  .room-viewport{ flex:1; overflow:hidden; border-radius:18px 18px 0 0; }
+  .room-track{ display:flex; transition: transform 0.35s cubic-bezier(0.22,0.9,0.35,1); }
+  .room-page{ flex:0 0 100%; width:100%; min-width:0; }
+  .room-nav-arrow{
+    flex:0 0 auto; width:34px; height:34px; border-radius:50%; border:none; cursor:pointer;
+    background:var(--paper); box-shadow: var(--shadow); font-size:18px; font-weight:800; color:var(--moss-dark);
+    display:flex; align-items:center; justify-content:center; clip-path: circle(50%);
+  }
+  .room-nav-arrow:disabled{ opacity:0.3; cursor:default; }
   .pot-label{
     margin-top:9px; font-size:10.5px; font-weight:800; color:var(--moss-dark);
     background:rgba(255,255,255,0.75); padding:3px 8px; border-radius:999px; text-align:center; max-width:100%;
@@ -158,7 +205,7 @@
   .fab:active{ transform: translateY(4px); box-shadow: 0 2px 0 var(--moss-dark); }
 
   .card{ background:var(--paper); border-radius:20px; border:2px solid #fff; box-shadow: var(--shadow); padding:14px; margin-bottom:14px; }
-  .shop-card{ margin-top:10px; }
+  .shop-card{ margin-top:auto; }
   .section-heading{ display:flex; align-items:center; justify-content:space-between; margin: 6px 0 10px; }
   .section-heading h3{ font-size:16px; margin:0; color:var(--ink);}
   .pill-btn{ font-family:'Nunito',sans-serif; font-weight:800; font-size:12.5px; border:none; border-radius:999px; padding:8px 14px; cursor:pointer;
@@ -264,6 +311,32 @@
   }
 
   .toast-stack{ position:absolute; top:62px; left:0; right:0; display:flex; flex-direction:column; align-items:center; gap:6px; z-index:50; pointer-events:none; }
+  .radio-widget{
+    position:absolute; top:56px; right:14px; z-index:16;
+    display:flex; flex-direction:column; align-items:center; gap:2px; cursor:pointer;
+    padding:5px; background:rgba(255,255,255,0.55); border-radius:16px;
+    clip-path: inset(0 round 16px);
+  }
+  .radio-widget.bounce svg{ animation: radioBounce 0.5s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes radioBounce{
+    0%{ transform: scale(1) rotate(0); }
+    30%{ transform: scale(1.22, 0.82) rotate(-6deg); }
+    55%{ transform: scale(0.9, 1.14) rotate(5deg); }
+    75%{ transform: scale(1.08, 0.95) rotate(-2deg); }
+    100%{ transform: scale(1) rotate(0); }
+  }
+  .radio-widget.playing .radio-dial{ animation: radioSpin 1.8s linear infinite; transform-origin: 29px 30px; }
+  @keyframes radioSpin{ 0%{transform:rotate(0);} 100%{transform:rotate(360deg);} }
+  .radio-label{ font-size:8.5px; font-weight:800; color:var(--ink-soft); max-width:56px; text-align:center; line-height:1.2; }
+  .radio-notes{ position:absolute; inset:0; pointer-events:none; overflow:visible; }
+  .radio-note{
+    position:absolute; bottom:14px; left:50%; font-size:13px; color:var(--moss-dark);
+    animation: radioNoteFloat 1.6s ease-out forwards;
+  }
+  @keyframes radioNoteFloat{
+    0%{ transform: translate(-50%,0) rotate(0deg); opacity:0.95; }
+    100%{ transform: translate(calc(-50% + var(--note-drift,10px)), -46px) rotate(var(--note-rot,12deg)); opacity:0; }
+  }
   .toast{
     background:var(--ink); color:#fff; font-weight:800; font-size:13px; padding:9px 16px; border-radius:999px;
     box-shadow:0 6px 14px rgba(0,0,0,0.25); animation: toastIn 0.25s ease, riseFade 0.4s ease 1.6s forwards;
@@ -272,6 +345,17 @@
 
   /* ---------- Real Leaflet map, locked camera, paper skin ---------- */
   .map-scene{ position:relative; border-radius:20px; overflow:hidden; box-shadow:var(--shadow); border:2px solid #fff; margin-bottom:14px; height:340px; background:#EFE6D2; }
+  .map-permission-screen{
+    display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+    gap:12px; min-height:360px; border-radius:20px; border:2px solid #fff; box-shadow:var(--shadow);
+    background: linear-gradient(180deg, var(--paper) 0%, #EFE6D2 100%); padding:30px 24px;
+  }
+  .map-permission-icon{ font-size:44px; }
+  .map-permission-title{ font-size:16px; font-weight:800; color:var(--ink); max-width:280px; line-height:1.4; }
+  .map-permission-sub{ font-size:12.5px; font-weight:600; color:var(--ink-soft); max-width:280px; line-height:1.5; }
+  .map-permission-buttons{ display:flex; flex-direction:column; gap:8px; margin-top:6px; width:100%; max-width:220px; }
+  .map-permission-buttons .pill-btn{ padding:11px 18px; font-size:13px; }
+  .map-permission-buttons .pill-btn:disabled{ opacity:0.7; cursor:default; }
   #leafletMap{ width:100%; height:100%; }
   .leaflet-container{ font-family:'Nunito',sans-serif; background:#EFE6D2 !important; }
   /* BUG FIX (muddy/muted map tiles): the previous filter combined saturate(0.92) -- which
@@ -495,6 +579,21 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" fill="#fff"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
       </div>
     </div>
+  </div>
+
+  <div class="radio-widget" id="radioWidget" data-action="toggle-radio" title="Radio">
+    <div class="radio-notes" id="radioNotes"></div>
+    <svg width="34" height="34" viewBox="0 0 40 40">
+      <rect x="7" y="14" width="26" height="19" rx="4" fill="#E8956B" stroke="#A8603C" stroke-width="1.6"/>
+      <line x1="14" y1="14" x2="9" y2="5" stroke="#A8603C" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="9" cy="5" r="1.6" fill="#A8603C"/>
+      <circle cx="14" cy="23" r="5.4" fill="#FCEBDD" stroke="#A8603C" stroke-width="1.4"/>
+      <circle cx="14" cy="23" r="2.2" fill="#A8603C" opacity="0.5"/>
+      <rect x="22" y="19" width="7" height="2.4" rx="1.2" fill="#A8603C" opacity="0.6"/>
+      <rect x="22" y="24" width="7" height="2.4" rx="1.2" fill="#A8603C" opacity="0.6"/>
+      <circle class="radio-dial" cx="29" cy="30" r="2" fill="#F5C24B" stroke="#A8603C" stroke-width="1"/>
+    </svg>
+    <div class="radio-label" id="radioLabel">Tap to play</div>
   </div>
 
   <div class="toast-stack" id="toastStack"></div>
@@ -777,6 +876,27 @@ const PACK_VISUALS = {
   mega:   { primary:'#F5C24B', secondary:'#C98A1C', label:'MEGA PACK' }
 };
 
+/* ===================== ROOMS: 8-stage garden progression ===================== */
+const ROOMS = [
+  { id:'windowsill',  name:'The Windowsill',                 short:'Windowsill', levelReq:1,  capacity:3,  theme:'sunny' },
+  { id:'kitchen',     name:'The Kitchen Counter',             short:'Kitchen',    levelReq:3,  capacity:5,  theme:'kitchen' },
+  { id:'sunroom',     name:'The Sunroom / Balcony',           short:'Sunroom',    levelReq:7,  capacity:8,  theme:'sunroom' },
+  { id:'patio',       name:'The Backyard Patio',               short:'Patio',      levelReq:12, capacity:10, theme:'patio' },
+  { id:'shed',        name:'The Tool Shed & Potting Bench',    short:'Shed',       levelReq:20, capacity:11, theme:'shed' },
+  { id:'greenhouse',  name:'The Glass Greenhouse (Wing A)',    short:'Greenhouse', levelReq:30, capacity:12, theme:'greenhouse' },
+  { id:'arboretum',   name:'The Tropical Arboretum (Wing B)',  short:'Arboretum',  levelReq:42, capacity:13, theme:'arboretum' },
+  { id:'ecodome',     name:'The Botanical Eco-Dome',           short:'Eco-Dome',   levelReq:55, capacity:15, theme:'ecodome' }
+];
+function isRoomUnlocked(roomIndex){ return state.level >= ROOMS[roomIndex].levelReq; }
+function activeRoomId(){ return ROOMS[state.currentRoom].id; }
+function activePots(){ return state.roomPots[activeRoomId()]; }
+function makeInitialRoomPots(){
+  const out = {};
+  ROOMS.forEach(r=>{ out[r.id] = new Array(r.capacity).fill(null); });
+  return out;
+}
+
+
 /* ===================== WEATHER (demo cycle, real-data-ready) ===================== */
 const WEATHER_TYPES = ['sunny','cloudy','rainy','snowy'];
 const WEATHER_ICONS = { sunny:'☀️ Sunny', cloudy:'☁️ Cloudy', rainy:'🌧️ Rainy', snowy:'❄️ Snowy' };
@@ -789,6 +909,55 @@ function cycleWeather(){
   weatherIndex = (weatherIndex + 1) % WEATHER_TYPES.length;
   state.weather = WEATHER_TYPES[weatherIndex];
   if(state.tab === 'garden' && !state.modal) render();
+}
+
+/* ---- Room carousel: paging, swipe, pagination dots ---- */
+// Room switches update the existing track/dots/arrow DOM directly (instead of a full render())
+// so the CSS transition on .room-track actually animates between the old and new position —
+// replacing the whole garden screen's innerHTML on every swipe would otherwise destroy and
+// recreate the track fresh at its final position with nothing to transition from.
+function updateRoomCarouselDOM(){
+  const track = document.getElementById('roomTrack');
+  if(track) track.style.transform = `translateX(-${state.currentRoom*100}%)`;
+  document.querySelectorAll('.room-dot').forEach((dot,i)=>{
+    dot.classList.toggle('active', i === state.currentRoom);
+  });
+  const leftArrow = document.querySelector('.room-nav-arrow.left');
+  const rightArrow = document.querySelector('.room-nav-arrow.right');
+  if(leftArrow) leftArrow.disabled = state.currentRoom === 0;
+  if(rightArrow) rightArrow.disabled = state.currentRoom === ROOMS.length - 1;
+  const title = document.querySelector('.screen-title');
+  if(title && state.tab === 'garden') title.textContent = ROOMS[state.currentRoom].name;
+}
+function goToRoom(index){
+  const next = Math.max(0, Math.min(ROOMS.length - 1, index));
+  if(next === state.currentRoom) return;
+  state.currentRoom = next;
+  if(state.tab === 'garden' && !state.modal && document.getElementById('roomTrack')){
+    updateRoomCarouselDOM();
+  } else {
+    render();
+  }
+}
+function changeRoom(delta){ goToRoom(state.currentRoom + delta); }
+let roomSwipeStartX = null;
+let roomSwipeStartY = null;
+const ROOM_SWIPE_THRESHOLD_PX = 40;
+function handleRoomTouchStart(e){
+  if(!e.touches || e.touches.length !== 1) return;
+  roomSwipeStartX = e.touches[0].clientX;
+  roomSwipeStartY = e.touches[0].clientY;
+}
+function handleRoomTouchEnd(e){
+  if(roomSwipeStartX === null) return;
+  const touch = e.changedTouches && e.changedTouches[0];
+  if(!touch){ roomSwipeStartX = null; return; }
+  const dx = touch.clientX - roomSwipeStartX;
+  const dy = touch.clientY - roomSwipeStartY;
+  roomSwipeStartX = null; roomSwipeStartY = null;
+  // Ignore mostly-vertical drags (the player is scrolling the page, not paging rooms).
+  if(Math.abs(dx) < ROOM_SWIPE_THRESHOLD_PX || Math.abs(dx) < Math.abs(dy)) return;
+  changeRoom(dx < 0 ? 1 : -1);
 }
 
 /* ===================== MAP: spawn pool, geofencing, POIs ===================== */
@@ -1117,7 +1286,8 @@ let state = {
   coins: 0,
   tab: 'garden',
   level: 1,
-  pots: [null, null, null],
+  roomPots: makeInitialRoomPots(),
+  currentRoom: 0,
   pouch: [],
   pendingLevelPacks: [],
   isLevelPackFlow: false,
@@ -1138,6 +1308,7 @@ let state = {
   discovered: {},
   dexHasUnseenDiscovery: false,
   settings: { music:false, sfx:true },
+  radio: { songIndex: -1, isPlaying: false },
   streak: null,
   weather: 'sunny',
   mapLocation: { status:'idle', lat:null, lon:null },
@@ -1222,6 +1393,70 @@ function playSfx(type){
 }
 function toggleMusic(){ state.settings.music = !state.settings.music; if(state.settings.music) startMusic(); else stopMusic(); render(); }
 function toggleSfx(){ state.settings.sfx = !state.settings.sfx; render(); }
+
+/* ===================== RADIO WIDGET: 10 short procedurally-synthesized songs ===================== */
+// Reuses the same playTone()/ensureAudio() Web Audio primitives as the rest of the game's music —
+// each "song" is a short, looping riff built from a distinct scale/waveform/tempo per genre.
+function noteFreq(semitonesFromA4){ return 440 * Math.pow(2, semitonesFromA4/12); }
+const RADIO_SONGS = [
+  { name:'Rainy Window',    genre:'Lo-Fi',     notes:[-9,-6,-4,-2,1,3,1,-2],          tempoMs:520, wave:'triangle', gain:0.05  },
+  { name:'Blue Note Café',  genre:'Jazz',      notes:[-9,-5,-2,2,5,2,-2,-5],          tempoMs:430, wave:'sine',     gain:0.045 },
+  { name:'Garage Static',   genre:'Rock',      notes:[-17,-17,-14,-12,-17,-17,-19,-17], tempoMs:260, wave:'square', gain:0.045 },
+  { name:'Sugar Rush',      genre:'Pop',       notes:[3,7,10,7,8,12,10,7],            tempoMs:300, wave:'triangle', gain:0.05  },
+  { name:'Moonlit Sonata',  genre:'Classical', notes:[-9,-7,-5,-4,-2,-4,-5,-7],       tempoMs:480, wave:'sine',     gain:0.045 },
+  { name:'Island Skank',    genre:'Reggae',    notes:[-9,-2,-9,-2,0,-2,-4,-2],        tempoMs:340, wave:'triangle', gain:0.045 },
+  { name:'Neon Highway',    genre:'Synthwave', notes:[-12,-9,-5,0,-14,-10,-7,-4],     tempoMs:220, wave:'sawtooth', gain:0.04  },
+  { name:'Crossroads',      genre:'Blues',     notes:[-9,-6,-4,-3,-2,1,3,1],          tempoMs:400, wave:'sine',     gain:0.05  },
+  { name:'Meadow Breeze',   genre:'Folk',      notes:[-7,-5,-2,0,2,0,-2,-5],          tempoMs:440, wave:'triangle', gain:0.045 },
+  { name:'Drifting Clouds', genre:'Ambient',   notes:[-9,-2,-5,0,-4,3,-2,-5],         tempoMs:700, wave:'sine',     gain:0.035 }
+];
+let radioTimer = null;
+let radioNoteTimer = null;
+function stopRadioPlayback(){
+  if(radioTimer){ clearTimeout(radioTimer); radioTimer = null; }
+  if(radioNoteTimer){ clearInterval(radioNoteTimer); radioNoteTimer = null; }
+}
+function spawnRadioNote(){
+  const container = document.getElementById('radioNotes');
+  if(!container) return;
+  const note = document.createElement('span');
+  note.className = 'radio-note';
+  note.textContent = Math.random() < 0.5 ? '♪' : '♫';
+  note.style.setProperty('--note-drift', (Math.random()*30-15).toFixed(0)+'px');
+  note.style.setProperty('--note-rot', (Math.random()*30-15).toFixed(0)+'deg');
+  container.appendChild(note);
+  setTimeout(()=>{ note.remove(); }, 1700);
+}
+function playRadioSong(song){
+  stopRadioPlayback();
+  let step = 0;
+  (function playStep(){
+    const ctx = ensureAudio();
+    if(ctx && ctx.state === 'running'){
+      playTone(noteFreq(song.notes[step % song.notes.length]), ctx.currentTime, song.gain, song.tempoMs/1000*0.92, song.wave);
+    }
+    step++;
+    radioTimer = setTimeout(playStep, song.tempoMs);
+  })();
+  radioNoteTimer = setInterval(spawnRadioNote, 850);
+  spawnRadioNote();
+}
+function cycleRadioSong(){
+  state.radio.songIndex = (state.radio.songIndex + 1) % RADIO_SONGS.length;
+  state.radio.isPlaying = true;
+  const song = RADIO_SONGS[state.radio.songIndex];
+  playRadioSong(song);
+  const widget = document.getElementById('radioWidget');
+  if(widget){
+    widget.classList.add('playing');
+    widget.classList.remove('bounce');
+    void widget.offsetWidth; // force reflow so the bounce animation restarts even on back-to-back taps
+    widget.classList.add('bounce');
+  }
+  const label = document.getElementById('radioLabel');
+  if(label) label.textContent = song.name;
+  toast(`📻 Now playing: ${song.name} (${song.genre})`);
+}
 
 /* ===================== WALK SESSION: Wake Lock + accelerometer step counter ===================== */
 let wakeLockSentinel = null;
@@ -1501,13 +1736,17 @@ function requestLocation(){
         lastAcceptedFixTs = nowTs;
         const hadRealFixBefore = state.mapLocation.status === 'granted';
         state.mapLocation = {status:'granted', lat:pos.coords.latitude, lon:pos.coords.longitude};
+        // If the map tab is showing the blank permission screen (no Leaflet instance mounted
+        // yet) and this is the fix that satisfies the last missing permission, a full render()
+        // is needed to swap from that screen to the real map and mount Leaflet — the lightweight
+        // per-fix DOM patches below only touch elements that exist once the real map is showing.
+        if(!hadRealFixBefore && state.tab === 'map' && !leafletMapInstance && mapPermissionsReady()){
+          render();
+          return;
+        }
         // Cheap UI updates happen every time...
         const chip = document.getElementById('mapLocChip');
         if(chip) chip.textContent = mapLocationText();
-        const btnWrap = document.getElementById('mapLocBtnWrap');
-        if(btnWrap && btnWrap.querySelector('[data-action="enable-location"]')){
-          btnWrap.querySelector('[data-action="enable-location"]').remove();
-        }
         // The very first real GPS lock bypasses the throttle below entirely: any ambient seeds
         // spawned earlier (before we had a real position, using the DEMO_CENTER fallback) get
         // reconciled onto the player's real coordinates immediately, instead of waiting up to
@@ -2150,6 +2389,7 @@ function updateRadarArrows(){
 
 /* ---- Leaflet map lifecycle ---- */
 async function initLeafletMap(){
+  if(!mapPermissionsReady() || !document.getElementById('leafletMap')) return; // blank permission screen is showing instead — nothing to mount
   const myGeneration = ++mapGeneration;
   try{
     if(typeof L === 'undefined'){ console.error('Flora: Leaflet failed to load'); return; }
@@ -2403,7 +2643,7 @@ function bloomSVG(type, stemH){
 }
 function plantSVG(potState){
   if(!potState){
-    return `<svg width="80" height="26" viewBox="0 0 92 30"><circle cx="46" cy="15" r="13" fill="none" stroke="#B8834F" stroke-width="2.2" stroke-dasharray="4 4"/><path d="M46 9V21M40 15H52" stroke="#B8834F" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+    return `<svg width="104" height="34" viewBox="0 0 92 30"><circle cx="46" cy="15" r="13" fill="none" stroke="#B8834F" stroke-width="2.2" stroke-dasharray="4 4"/><path d="M46 9V21M40 15H52" stroke="#B8834F" stroke-width="2.4" stroke-linecap="round"/></svg>`;
   }
   const type = SEED_TYPES[potState.type];
   const frac = Math.min(1, potState.progress / type.threshold);
@@ -2434,7 +2674,7 @@ function plantSVG(potState){
   } else if(frac < 0.15){
     bloom = `<path d="M42 63 Q46 58 50 63" stroke="${LEAF_GREEN}" stroke-width="2" fill="none" stroke-linecap="round"/>`;
   }
-  return `<svg width="94" height="72" viewBox="0 0 92 70" ${sway}><path d="${stemPathD(stemH, type.shape)}" stroke="#4A6B42" stroke-width="3" fill="none" stroke-linecap="round"/>${leaves}${bloom}</svg>`;
+  return `<svg width="122" height="94" viewBox="0 0 92 70" ${sway}><path d="${stemPathD(stemH, type.shape)}" stroke="#4A6B42" stroke-width="3" fill="none" stroke-linecap="round"/>${leaves}${bloom}</svg>`;
 }
 
 /* ===================== POT RENDERING (fixed shelf anchor, tap-to-inspect) ===================== */
@@ -2453,15 +2693,15 @@ function potVisualInner(potState){
   // still reads clearly in front, since it extends outside that ellipse's silhouette.
   return `
     ${ready ? `<div class="ready-badge">✨ Ready!</div>` : ''}
-    <svg width="78" height="50" viewBox="0 0 88 58" style="position:absolute; left:50%; bottom:0; transform:translateX(-50%); z-index:1;">
+    <svg width="101" height="65" viewBox="0 0 88 58" style="position:absolute; left:50%; bottom:0; transform:translateX(-50%); z-index:1;">
       <ellipse cx="44" cy="14" rx="34" ry="7" fill="#3a2a1c" opacity="0.18"/>
       <path d="M10 12 L18 54 Q44 60 70 54 L78 12 Z" fill="var(--terracotta)" stroke="var(--terracotta-dark)" stroke-width="2" stroke-linejoin="round"/>
       <ellipse cx="44" cy="12" rx="34" ry="8" fill="var(--terracotta-rim)" stroke="var(--terracotta-dark)" stroke-width="2"/>
       <ellipse cx="44" cy="12" rx="27" ry="5" fill="#5C4028"/>
       <path d="M18 30 Q44 34 70 30" stroke="var(--terracotta-dark)" stroke-width="1.4" fill="none" opacity="0.5"/>
     </svg>
-    <div style="position:absolute; left:50%; bottom:22px; transform:translateX(-50%); z-index:2;">${plantSVG(potState)}</div>
-    <svg width="78" height="50" viewBox="0 0 88 58" style="position:absolute; left:50%; bottom:0; transform:translateX(-50%); z-index:3; pointer-events:none;" aria-hidden="true">
+    <div style="position:absolute; left:50%; bottom:29px; transform:translateX(-50%); z-index:2;">${plantSVG(potState)}</div>
+    <svg width="101" height="65" viewBox="0 0 88 58" style="position:absolute; left:50%; bottom:0; transform:translateX(-50%); z-index:3; pointer-events:none;" aria-hidden="true">
       <ellipse cx="44" cy="12" rx="34" ry="8" fill="var(--terracotta-rim)" stroke="var(--terracotta-dark)" stroke-width="2"/>
       <ellipse cx="44" cy="12" rx="27" ry="5" fill="#5C4028"/>
     </svg>
@@ -2476,7 +2716,7 @@ function potSVG(index, potState){
   </div>`;
 }
 function animatePotGrowth(index, fromProgress, toProgress){
-  const p = state.pots[index];
+  const p = activePots()[index];
   if(!p) return;
   const stepSize = 100;
   let interim = fromProgress;
@@ -2529,8 +2769,36 @@ function weatherLayerSVG(weather){
 }
 
 /* ===================== SCREENS ===================== */
+function potBasisFor(capacity){
+  if(capacity <= 5) return '31%';   // 3 per row
+  if(capacity <= 8) return '23%';   // 4 per row
+  if(capacity <= 12) return '18%';  // 5 per row
+  return '14.5%';                   // 6 per row (13-15 pots)
+}
+function roomPageHtml(room, index){
+  const unlocked = isRoomUnlocked(index);
+  const pots = state.roomPots[room.id];
+  const potsHtml = pots.map((p,i)=> potSVG(i,p)).join('');
+  const isWindowsill = room.id === 'windowsill';
+  return `
+    <div class="room-page">
+      <div class="room-scene ${isWindowsill ? 'windowsill weather-'+state.weather : 'theme-'+room.theme} ${unlocked?'':'room-locked'}">
+        <div class="room-scene-label">${room.name}</div>
+        ${isWindowsill ? `<div class="weather-chip">${WEATHER_ICONS[state.weather]}</div>` : ''}
+        ${isWindowsill ? skyDecoSVG(state.weather) + weatherLayerSVG(state.weather) : ''}
+        ${isWindowsill ? '<div class="window-mullion-v"></div><div class="window-mullion-h"></div>' : ''}
+        <div class="pots-row" style="--pot-w:${potBasisFor(room.capacity)};">${potsHtml}</div>
+        <div class="shelf"></div>
+        ${unlocked ? '' : `
+        <div class="room-lock-overlay" data-action="locked-room-tap">
+          <div class="room-lock-icon">🔒</div>
+          <div class="room-lock-text">Unlocks at Level ${room.levelReq}</div>
+        </div>`}
+      </div>
+      <div class="room-capacity-note">${pots.filter(Boolean).length}/${room.capacity} pots in use</div>
+    </div>`;
+}
 function renderGarden(){
-  const potsHtml = state.pots.map((p,i)=> potSVG(i,p)).join('');
   const day = nextStreakDay();
   const streakHtml = streakClaimable() ? `
     <div class="streak-card" data-action="claim-streak">
@@ -2538,19 +2806,23 @@ function renderGarden(){
       <div style="flex:1;"><b>🔥 Day ${day} streak ready!</b><span>Tap to claim your daily reward</span></div>
       <button class="pill-btn primary">Claim</button>
     </div>` : '';
+  const roomPagesHtml = ROOMS.map((room,i)=> roomPageHtml(room,i)).join('');
+  const dotsHtml = ROOMS.map((room,i)=> `<span class="room-dot ${i===state.currentRoom?'active':''} ${isRoomUnlocked(i)?'':'locked'}" data-action="room-jump" data-room-index="${i}" title="${room.short}"></span>`).join('');
+  const atFirst = state.currentRoom === 0;
+  const atLast = state.currentRoom === ROOMS.length - 1;
 
   return `
-    <div class="screen-title">Your Windowsill</div>
-    <div class="screen-sub">Walk to grow — tap a pot to plant or inspect it.</div>
+    <div class="garden-screen">
+    <div class="screen-title">${ROOMS[state.currentRoom].name}</div>
+    <div class="screen-sub">Walk to grow — tap a pot to plant or inspect it. Room ${state.currentRoom+1} of ${ROOMS.length}.</div>
     ${streakHtml}
-    <div class="windowsill weather-${state.weather}">
-      <div class="weather-chip">${WEATHER_ICONS[state.weather]}</div>
-      ${skyDecoSVG(state.weather)}
-      ${weatherLayerSVG(state.weather)}
-      <div class="window-mullion-v"></div>
-      <div class="window-mullion-h"></div>
-      <div class="pots-row">${potsHtml}</div>
-      <div class="shelf"></div>
+    <div class="room-dots">${dotsHtml}</div>
+    <div class="room-carousel">
+      <button class="room-nav-arrow left" data-action="room-prev" ${atFirst?'disabled':''}>‹</button>
+      <div class="room-viewport" id="roomViewport">
+        <div class="room-track" id="roomTrack" style="transform:translateX(-${state.currentRoom*100}%);">${roomPagesHtml}</div>
+      </div>
+      <button class="room-nav-arrow right" data-action="room-next" ${atLast?'disabled':''}>›</button>
     </div>
     <div class="fab-wrap">
       <button class="pill-btn fab" data-action="simulate">
@@ -2561,6 +2833,7 @@ function renderGarden(){
     <div class="card shop-card">
       <div class="section-heading"><h3>🛍️ Seed Shop</h3><button class="pill-btn gold" data-action="open-shop">Browse Packs</button></div>
       <div class="screen-sub" style="margin:0;">4 pack tiers, from cheap Sprout Packs to guaranteed-Epic Mega Packs.</div>
+    </div>
     </div>
   `;
 }
@@ -2606,17 +2879,29 @@ function renderPouch(){
   `;
 }
 
-function renderMap(){
-  const notifBtn = (typeof Notification !== 'undefined' && state.notifPermission !== 'granted') ? `<button class="pill-btn soft" data-action="enable-notifications">🔔 Enable alerts</button>` : '';
-  const locBtn = state.mapLocation.status !== 'granted' ? `<button class="pill-btn primary" data-action="enable-location">Enable Location</button>` : '';
+function mapPermissionsReady(){
   const compassSupported = typeof DeviceOrientationEvent !== 'undefined';
-  const compassBtn = (compassSupported && !compassEnabled) ? `<button class="pill-btn soft" data-action="enable-compass">🧭 Enable Compass</button>` : '';
-  // BUG FIX (walk button state toggle): this button's label/style already correctly reflect
-  // state.walkActive whenever this markup string gets freshly rendered — the actual bug was that
-  // render()'s "stayingOnMap" fast-path (used whenever the map tab is already mounted) skipped
-  // regenerating this markup entirely, so the button visually never switched labels while the
-  // player stayed on the Map tab and tapped it (see the render() fix near mapLocBtnWrap below).
-  // Also gave it a stable id so that fast-path can update it directly without a full re-render.
+  return state.mapLocation.status === 'granted' && (compassEnabled || !compassSupported);
+}
+function renderMap(){
+  if(!mapPermissionsReady()){
+    const compassSupported = typeof DeviceOrientationEvent !== 'undefined';
+    const locDone = state.mapLocation.status === 'granted';
+    const locating = state.mapLocation.status === 'locating';
+    return `
+      <div class="screen-title">Trail Map</div>
+      <div class="map-permission-screen">
+        <div class="map-permission-icon">🧭</div>
+        <div class="map-permission-title">Please enable both your device location and compass to explore Flora.</div>
+        <div class="map-permission-sub">The map can't show your position, find nearby seeds, or point you toward them without both permissions active — it simply won't function without them.</div>
+        <div class="map-permission-buttons">
+          <button class="pill-btn ${locDone?'gold':'primary'}" data-action="enable-location" ${locDone?'disabled':''}>${locating ? '📍 Locating…' : locDone ? '📍 Location enabled' : '📍 Enable Location'}</button>
+          ${compassSupported ? `<button class="pill-btn ${compassEnabled?'gold':'soft'}" data-action="enable-compass" ${compassEnabled?'disabled':''}>${compassEnabled ? '🧭 Compass enabled' : '🧭 Enable Compass'}</button>` : ''}
+        </div>
+      </div>
+    `;
+  }
+  const notifBtn = (typeof Notification !== 'undefined' && state.notifPermission !== 'granted') ? `<button class="pill-btn soft" data-action="enable-notifications">🔔 Enable alerts</button>` : '';
   const walkBtn = `<button class="pill-btn ${state.walkActive ? 'gold' : 'soft'}" id="walkSessionBtn" data-action="toggle-walk">${state.walkActive ? '⏹️ End Walk Session' : '🚶 Start Walk Session'}</button>`;
   return `
     <div class="screen-title">Trail Map</div>
@@ -2624,7 +2909,7 @@ function renderMap(){
     <div class="map-scene"><div id="leafletMap"></div><div class="radar-layer" id="radarLayer"></div></div>
     <div class="card" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
       <div class="screen-sub" id="mapLocChip" style="margin:0;">${mapLocationText()}</div>
-      <div style="display:flex; gap:6px; flex-wrap:wrap;" id="mapLocBtnWrap">${locBtn}${compassBtn}${walkBtn}${notifBtn}</div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;" id="mapLocBtnWrap">${walkBtn}${notifBtn}</div>
     </div>
     <div class="screen-sub" style="text-align:center;">2-3 seeds always sprout organically within 500m — collect one and a replacement grows back in 10-30 min. Rarer seeds sprout on their own every few hours and vanish if left too long (12h).</div>
   `;
@@ -2708,7 +2993,7 @@ function renderCompostConfirmModal(){
 
 function renderPotInspectModal(){
   const idx = state.inspectPotIndex;
-  const p = state.pots[idx];
+  const p = activePots()[idx];
   if(!p) return '';
   const type = SEED_TYPES[p.type];
   const frac = Math.min(1, p.progress/type.threshold);
@@ -2986,13 +3271,21 @@ function completeTear(leftHalf, rightHalf){
 // real walking drives the exact same seed growth / distance tracking / leveling logic.
 function addSteps(n){
   state.totalSteps += n;
-  const growthUpdates = [];
-  state.pots = state.pots.map((p,i)=>{
-    if(!p) return p;
-    const type = SEED_TYPES[p.type];
-    const newProgress = Math.min(type.threshold, p.progress + n);
-    if(newProgress > p.progress) growthUpdates.push({index:i, from:p.progress, to:newProgress, threshold:type.threshold});
-    return {...p, progress:newProgress};
+  const activeId = activeRoomId();
+  const allReadyEvents = []; // across every room — used for the "ready to harvest" toast
+  const growthUpdates = [];  // active room only — used to animate the currently-visible pots
+  ROOMS.forEach(room=>{
+    state.roomPots[room.id] = state.roomPots[room.id].map((p,i)=>{
+      if(!p) return p;
+      const type = SEED_TYPES[p.type];
+      const newProgress = Math.min(type.threshold, p.progress + n);
+      if(newProgress > p.progress){
+        const update = {index:i, from:p.progress, to:newProgress, threshold:type.threshold};
+        allReadyEvents.push(update);
+        if(room.id === activeId) growthUpdates.push(update);
+      }
+      return {...p, progress:newProgress};
+    });
   });
   const leveled = checkLevelUp();
   if(state.tab === 'garden' && !state.modal){
@@ -3000,7 +3293,7 @@ function addSteps(n){
   } else {
     render();
   }
-  return { growthUpdates, leveled };
+  return { growthUpdates: allReadyEvents, leveled };
 }
 function simulateSteps(){
   const { growthUpdates, leveled } = addSteps(500);
@@ -3026,7 +3319,7 @@ function openPotInspect(index){
 
 function plantSeed(uid){
   if(uid === 'free-common'){
-    state.pots[state.plantTarget] = {uid:'free-common', type:'common', progress:0};
+    activePots()[state.plantTarget] = {uid:'free-common', type:'common', progress:0};
     state.modal = null;
     playSfx('plant');
     toast(`Planted ${SEED_TYPES.common.name}!`);
@@ -3036,7 +3329,7 @@ function plantSeed(uid){
   const idx = state.pouch.findIndex(s=> String(s.uid) === String(uid));
   if(idx === -1) return;
   const item = state.pouch[idx];
-  state.pots[state.plantTarget] = {uid: item.uid, type: item.type, progress:0};
+  activePots()[state.plantTarget] = {uid: item.uid, type: item.type, progress:0};
   state.pouch.splice(idx,1);
   state.modal = null;
   playSfx('plant');
@@ -3045,7 +3338,7 @@ function plantSeed(uid){
 }
 
 function harvestPot(index){
-  const p = state.pots[index];
+  const p = activePots()[index];
   if(!p) return;
   const type = SEED_TYPES[p.type];
   if(p.progress < type.threshold) return;
@@ -3053,7 +3346,7 @@ function harvestPot(index){
   state.totalCoinsEarned += type.harvest;
   state.totalHarvested += 1;
   state.dex[p.type] = (state.dex[p.type] || 0) + 1;
-  state.pots[index] = null;
+  activePots()[index] = null;
   playSfx('harvest');
   toast(`Harvested! +${type.harvest}¢`);
 }
@@ -3204,8 +3497,9 @@ function handleClick(e){
       if(action === 'claim-streak'){ claimDailyReward(); return; }
       if(action === 'harvest-pot'){ harvestPot(parseInt(actionEl.dataset.idx)); state.modal = null; render(); return; }
       if(action === 'plant-request'){
-        const emptyIdx = state.pots.findIndex(p=>!p);
-        if(emptyIdx === -1){ toast('All pots are full!'); return; }
+        if(!isRoomUnlocked(state.currentRoom)){ toast(`🔒 ${ROOMS[state.currentRoom].name} isn't unlocked yet!`); return; }
+        const emptyIdx = activePots().findIndex(p=>!p);
+        if(emptyIdx === -1){ toast('All pots in this room are full!'); return; }
         openPlantModal(emptyIdx, actionEl.dataset.uid);
         return;
       }
@@ -3217,6 +3511,11 @@ function handleClick(e){
       if(action === 'toggle-walk'){ toggleWalkSession(); return; }
       if(action === 'enable-notifications'){ requestNotifications(); return; }
       if(action === 'collect-nearest'){ if(inRangeSpawnUid) collectWildSpawn(inRangeSpawnUid); return; }
+      if(action === 'room-prev'){ changeRoom(-1); return; }
+      if(action === 'room-next'){ changeRoom(1); return; }
+      if(action === 'room-jump'){ goToRoom(parseInt(actionEl.dataset.roomIndex)); return; }
+      if(action === 'locked-room-tap'){ toast(`🔒 ${ROOMS[state.currentRoom].name} unlocks at Level ${ROOMS[state.currentRoom].levelReq}`); return; }
+      if(action === 'toggle-radio'){ cycleRadioSong(); return; }
     }
 
     const backdrop = el.closest('.modal-backdrop');
@@ -3224,8 +3523,9 @@ function handleClick(e){
 
     const potSlot = el.closest('.pot-slot');
     if(potSlot){
+      if(!isRoomUnlocked(state.currentRoom)) return; // the lock overlay already intercepts taps, but guard anyway
       const idx = parseInt(potSlot.dataset.pot);
-      const p = state.pots[idx];
+      const p = activePots()[idx];
       if(!p) openPlantModal(idx);
       else openPotInspect(idx);
       return;
@@ -3244,6 +3544,12 @@ function handleClick(e){
   }
 }
 document.getElementById('phone').addEventListener('click', handleClick);
+document.getElementById('phone').addEventListener('touchstart', e=>{
+  if(e.target.closest('#roomViewport')) handleRoomTouchStart(e);
+}, {passive:true});
+document.getElementById('phone').addEventListener('touchend', e=>{
+  if(e.target.closest('#roomViewport')) handleRoomTouchEnd(e);
+}, {passive:true});
 
 render();
 initStreak();
