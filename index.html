@@ -76,15 +76,19 @@
   .content{ flex:1; overflow-y:auto; padding: 4px 16px 110px; position:relative; z-index:1; -webkit-overflow-scrolling:touch; }
   .content::-webkit-scrollbar{width:0;}
 
-  .screen-title{ font-size:24px; font-weight:800; color:var(--ink); margin: 4px 0 2px; }
-  .screen-sub{ font-size:12.5px; color:var(--ink-soft); margin-bottom:12px; font-weight:600; }
+  .screen-title{ font-size:18px; font-weight:800; color:var(--ink); margin: 2px 0 1px; }
+  .screen-sub{ font-size:10.5px; color:var(--ink-soft); margin-bottom:6px; font-weight:600; }
 
-  /* ---------- Room scenes (8-stage garden progression) ---------- */
-  .garden-screen{ display:flex; flex-direction:column; min-height:100%; }
+  /* ---------- Room scenes (8-stage garden progression) ----------
+     Fixed, uniform sizing across every room: .garden-screen never scrolls (height:100% + overflow
+     hidden, matching the "must fit one viewport" requirement), and .room-scene is a single fixed
+     pixel height shared by all 8 rooms (kept in sync with the ROOM_SCENE_H/ROOM_SHELF_H JS
+     constants) so switching rooms never resizes the container -- only what's arranged inside it. */
+  .garden-screen{ height:100%; overflow:hidden; display:flex; flex-direction:column; }
   .room-scene{
-    position:relative; border-radius:18px 18px 0 0; overflow:hidden;
-    box-shadow: var(--shadow); border: 10px solid var(--wood); border-bottom:none;
-    transition: background 0.8s ease; min-height:300px; display:flex; flex-direction:column;
+    position:relative; border-radius:16px 16px 0 0; overflow:hidden; height:216px; flex:0 0 auto;
+    box-shadow: var(--shadow); border: 8px solid var(--wood); border-bottom:none;
+    transition: background 0.8s ease; display:flex; flex-direction:column;
   }
   .windowsill.weather-sunny{ background: linear-gradient(to bottom, #CFE3DE 0%, #CFE3DE 58%, #F5E9D3 100%); }
   .windowsill.weather-cloudy{ background: linear-gradient(to bottom, #C6CCC3 0%, #C6CCC3 58%, #E4DCC6 100%); }
@@ -94,43 +98,45 @@
   .room-scene.theme-sunroom{    background: linear-gradient(to bottom, #FCE8B8 0%, #FCE8B8 55%, #F6D98A 100%); }
   .room-scene.theme-patio{      background: linear-gradient(to bottom, #BFE0C9 0%, #BFE0C9 55%, #E7C9A6 100%); }
   .room-scene.theme-shed{       background: linear-gradient(to bottom, #D9CBB3 0%, #D9CBB3 55%, #B99C74 100%); }
-  .room-scene.theme-greenhouse{ background: linear-gradient(to bottom, #C9E9DD 0%, #C9E9DD 55%, #9FD3C0 100%); }
+  .room-scene.theme-greenhouse{ background: linear-gradient(to bottom, #C9E9DD 0%, #C9E9DD 55%, #9FD3C0 100%);
+    background-image: linear-gradient(to bottom, #C9E9DD 0%, #C9E9DD 55%, #9FD3C0 100%),
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.35) 0px, rgba(255,255,255,0.35) 1px, transparent 1px, transparent 34px); }
   .room-scene.theme-arboretum{  background: linear-gradient(to bottom, #A9D8A0 0%, #A9D8A0 55%, #6FAE68 100%); }
   .room-scene.theme-ecodome{    background: linear-gradient(to bottom, #CFE0F5 0%, #CFE0F5 55%, #C9B8ED 100%); }
+  .room-decor-icon{ position:absolute; top:6px; left:9px; z-index:3; font-size:15px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25)); }
   .room-scene-label{
-    position:absolute; top:10px; right:12px; z-index:3;
-    background:rgba(255,255,255,0.82); border-radius:999px; padding:4px 11px;
-    font-size:10.5px; font-weight:800; color:var(--ink);
+    position:absolute; top:6px; right:9px; z-index:3;
+    background:rgba(255,255,255,0.82); border-radius:999px; padding:3px 9px;
+    font-size:9.5px; font-weight:800; color:var(--ink);
   }
   .room-locked{ filter: grayscale(1) brightness(0.72); }
   .room-lock-overlay{
     position:absolute; inset:0; z-index:5; cursor:pointer;
     background: rgba(20,20,20,0.28);
-    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;
   }
-  .room-lock-icon{ font-size:34px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
+  .room-lock-icon{ font-size:28px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
   .room-lock-text{
-    background:rgba(255,255,255,0.92); border-radius:999px; padding:5px 14px;
-    font-size:12px; font-weight:800; color:var(--ink);
+    background:rgba(255,255,255,0.92); border-radius:999px; padding:4px 12px;
+    font-size:11px; font-weight:800; color:var(--ink);
   }
-  .window-mullion-v{ position:absolute; top:0; bottom:44px; left:50%; width:8px; margin-left:-4px; background:var(--wood); z-index:2; opacity:0.85; }
-  .window-mullion-h{ position:absolute; left:0; right:0; top:38%; height:8px; background:var(--wood); z-index:2; opacity:0.85; }
+  .window-mullion-v{ position:absolute; top:0; bottom:32px; left:50%; width:7px; margin-left:-3.5px; background:var(--wood); z-index:2; opacity:0.85; }
+  .window-mullion-h{ position:absolute; left:0; right:0; top:34%; height:7px; background:var(--wood); z-index:2; opacity:0.85; }
   .weather-chip{
-    position:absolute; top:10px; left:10px; z-index:3;
-    background:rgba(255,255,255,0.8); border-radius:999px; padding:4px 10px;
-    font-size:11px; font-weight:800; color:var(--ink); display:flex; align-items:center; gap:4px;
+    position:absolute; bottom:37px; left:8px; z-index:3;
+    background:rgba(255,255,255,0.8); border-radius:999px; padding:3px 8px;
+    font-size:9.5px; font-weight:800; color:var(--ink); display:flex; align-items:center; gap:3px;
   }
   .sky-deco{ position:absolute; inset:0; z-index:0; }
   .weather-layer{ position:absolute; inset:0; z-index:1; pointer-events:none; }
-  .pots-row{
-    position:relative; flex:1; display:flex; flex-wrap:wrap; align-content:center; justify-content:space-around;
-    padding: 84px 10px 10px; gap:10px 0; z-index:2;
-  }
+  /* Pots are positioned individually via inline left%/bottom-px styles computed by
+     computePotLayout() (JS) -- this is purely the positioning context for them. */
+  .pots-row{ position:relative; flex:1; z-index:2; }
   .shelf{
-    position:relative; height:44px;
+    position:relative; height:32px; flex:0 0 auto;
     background: linear-gradient(180deg, var(--wood) 0%, var(--wood) 55%, var(--wood-dark) 55%, var(--wood-dark) 100%);
-    border-top:3px solid #7a5230; border-left:10px solid var(--wood); border-right:10px solid var(--wood); border-bottom:12px solid var(--wood-dark);
-    border-radius:0 0 14px 14px;
+    border-top:3px solid #7a5230; border-left:8px solid var(--wood); border-right:8px solid var(--wood); border-bottom:9px solid var(--wood-dark);
+    border-radius:0 0 12px 12px;
     box-shadow: 0 -4px 8px rgba(255,255,255,0.15) inset, 0 8px 12px rgba(0,0,0,0.28);
     z-index:2; overflow:hidden;
   }
@@ -142,37 +148,38 @@
     content:""; position:absolute; left:0; right:0; top:0; height:4px;
     background: rgba(0,0,0,0.22); filter: blur(2px);
   }
-  .pot-slot{ display:flex; flex-direction:column; align-items:center; width:var(--pot-w,31%); flex:0 0 var(--pot-w,31%); cursor:pointer; user-select:none; }
-  .pot-visual{ position:relative; height:148px; width:100%; display:flex; align-items:flex-end; justify-content:center; }
-  .pot-visual svg{ overflow:visible; max-width:100%; height:auto; }
-  .room-capacity-note{ text-align:center; font-size:10.5px; font-weight:700; color:var(--ink-soft); margin:6px 0 2px; }
+  .pot-slot{ position:absolute; bottom:0; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; cursor:pointer; user-select:none; }
+  .pot-slot-scale{ transform-origin:bottom center; display:flex; flex-direction:column; align-items:center; }
+  .pot-visual{ position:relative; height:148px; width:101px; display:flex; align-items:flex-end; justify-content:center; }
+  .pot-visual svg{ overflow:visible; }
+  .room-capacity-note{ text-align:center; font-size:9.5px; font-weight:700; color:var(--ink-soft); margin:3px 0 1px; flex:0 0 auto; }
 
   /* ---------- Room carousel: dots + arrows + swipeable track ---------- */
-  .room-dots{ display:flex; justify-content:center; align-items:center; gap:7px; margin-bottom:10px; }
+  .room-dots{ display:flex; justify-content:center; align-items:center; gap:6px; margin-bottom:6px; flex:0 0 auto; }
   .room-dot{
-    width:7px; height:7px; border-radius:50%; background:var(--line); cursor:pointer;
+    width:6px; height:6px; border-radius:50%; background:var(--line); cursor:pointer;
     transition: all 0.2s ease; flex:0 0 auto;
   }
-  .room-dot.active{ background:var(--moss); width:18px; border-radius:999px; }
+  .room-dot.active{ background:var(--moss); width:16px; border-radius:999px; }
   .room-dot.locked{ background:#d8d0c0; }
-  .room-carousel{ display:flex; align-items:center; gap:4px; }
-  .room-viewport{ flex:1; overflow:hidden; border-radius:18px 18px 0 0; }
+  .room-carousel{ display:flex; align-items:center; gap:4px; flex:0 0 auto; }
+  .room-viewport{ flex:1; overflow:hidden; border-radius:16px 16px 0 0; }
   .room-track{ display:flex; transition: transform 0.35s cubic-bezier(0.22,0.9,0.35,1); }
-  .room-page{ flex:0 0 100%; width:100%; min-width:0; }
+  .room-page{ flex:0 0 100%; width:100%; min-width:0; display:flex; flex-direction:column; }
   .room-nav-arrow{
-    flex:0 0 auto; width:34px; height:34px; border-radius:50%; border:none; cursor:pointer;
-    background:var(--paper); box-shadow: var(--shadow); font-size:18px; font-weight:800; color:var(--moss-dark);
+    flex:0 0 auto; width:28px; height:28px; border-radius:50%; border:none; cursor:pointer;
+    background:var(--paper); box-shadow: var(--shadow); font-size:15px; font-weight:800; color:var(--moss-dark);
     display:flex; align-items:center; justify-content:center; clip-path: circle(50%);
   }
   .room-nav-arrow:disabled{ opacity:0.3; cursor:default; }
   .pot-label{
-    margin-top:9px; font-size:10.5px; font-weight:800; color:var(--moss-dark);
-    background:rgba(255,255,255,0.75); padding:3px 8px; border-radius:999px; text-align:center; max-width:100%;
+    margin-top:5px; font-size:8px; font-weight:800; color:var(--moss-dark);
+    background:rgba(255,255,255,0.75); padding:2px 6px; border-radius:999px; text-align:center; max-width:74px;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   .ready-badge{
-    position:absolute; top:-18px; font-size:9.5px; font-weight:800; color:#fff; background:var(--gold);
-    padding:3px 8px; border-radius:999px; box-shadow:0 2px 4px rgba(0,0,0,0.2);
+    position:absolute; top:-16px; font-size:8.5px; font-weight:800; color:#fff; background:var(--gold);
+    padding:2px 7px; border-radius:999px; box-shadow:0 2px 4px rgba(0,0,0,0.2);
     animation: bob 1.4s ease-in-out infinite; white-space:nowrap; z-index:4;
   }
   @keyframes bob{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(-4px);} }
@@ -192,20 +199,24 @@
   @keyframes confettiFall{ 0%{transform:translateY(-16px) rotate(0deg); opacity:1;} 100%{transform:translateY(170px) rotate(320deg); opacity:0;} }
   @keyframes badgePulse{ 0%,100%{transform:scale(1);} 50%{transform:scale(1.25);} }
 
-  .fab-wrap{ display:flex; justify-content:center; margin: 14px 0 16px; }
+  .fab-wrap{ display:flex; justify-content:center; margin: 8px 0; flex:0 0 auto; }
   .fab{
-    display:flex; align-items:center; gap:10px;
+    display:flex; align-items:center; gap:8px;
     background: linear-gradient(180deg, var(--moss-light), var(--moss)); color:#fff; border:none;
-    border-radius:999px; padding:14px 22px; font-family:'Baloo 2',sans-serif; font-size:16px; font-weight:700;
-    box-shadow: 0 6px 0 var(--moss-dark), 0 8px 14px rgba(58,82,54,0.35);
+    border-radius:999px; padding:9px 16px; font-family:'Baloo 2',sans-serif; font-size:13px; font-weight:700;
+    box-shadow: 0 4px 0 var(--moss-dark), 0 6px 10px rgba(58,82,54,0.35);
     cursor:pointer; transition: transform 0.08s ease;
     /* BUG FIX (hitbox shape): match the tappable region to the pill's true rounded silhouette. */
     clip-path: inset(0 round 999px);
   }
-  .fab:active{ transform: translateY(4px); box-shadow: 0 2px 0 var(--moss-dark); }
+  .fab:active{ transform: translateY(3px); box-shadow: 0 1px 0 var(--moss-dark); }
 
   .card{ background:var(--paper); border-radius:20px; border:2px solid #fff; box-shadow: var(--shadow); padding:14px; margin-bottom:14px; }
-  .shop-card{ margin-top:auto; }
+  /* Fixed height, no auto-growth: the shop card sits flush above the bottom nav every time, and
+     never expands to break the room-scene's proportions above it (see requirement 3). */
+  .shop-card{ margin-top:auto; margin-bottom:0; flex:0 0 auto; height:74px; padding:10px 14px; box-sizing:border-box; overflow:hidden; display:flex; flex-direction:column; justify-content:center; }
+  .shop-card .section-heading{ margin:0 0 4px; }
+  .shop-card .screen-sub{ margin:0; }
   .section-heading{ display:flex; align-items:center; justify-content:space-between; margin: 6px 0 10px; }
   .section-heading h3{ font-size:16px; margin:0; color:var(--ink);}
   .pill-btn{ font-family:'Nunito',sans-serif; font-weight:800; font-size:12.5px; border:none; border-radius:999px; padding:8px 14px; cursor:pointer;
@@ -237,15 +248,17 @@
   .composter-corner.bump{ animation: navPulse 0.5s ease; }
 
   .streak-card{
-    display:flex; align-items:center; gap:12px; margin-bottom:16px;
+    display:flex; align-items:center; gap:10px; margin-bottom:6px; flex:0 0 auto;
     background: linear-gradient(135deg, var(--gold-light), var(--gold));
-    border-radius:18px; padding:12px 14px; border:2px solid #d8972c; cursor:pointer;
+    border-radius:16px; padding:8px 12px; border:2px solid #d8972c; cursor:pointer;
     animation: bob 2s ease-in-out infinite;
     /* BUG FIX (hitbox shape): match the tappable region to the card's own rounded corners. */
-    clip-path: inset(0 round 18px);
+    clip-path: inset(0 round 16px);
   }
-  .streak-card b{ display:block; font-size:14px; color:#4a3416; }
-  .streak-card span{ font-size:11px; color:#6b4d1c; font-weight:700; }
+  .streak-card svg{ flex:0 0 auto; width:28px; height:28px; }
+  .streak-card b{ display:block; font-size:12.5px; color:#4a3416; }
+  .streak-card span{ font-size:10px; color:#6b4d1c; font-weight:700; }
+  .streak-card .pill-btn{ padding:6px 12px; font-size:11px; }
 
   .bottom-nav{
     position:absolute; left:0; right:0; bottom:0; display:flex; background:var(--paper);
@@ -287,7 +300,12 @@
 
   .modal-backdrop{
     position:absolute; inset:0; background:rgba(58,42,25,0.45); display:flex; align-items:flex-end;
-    justify-content:center; z-index:30; animation: fadeIn 0.15s ease;
+    justify-content:center; z-index:100; animation: fadeIn 0.15s ease;
+    /* z-index fixed at 100 -- strictly above every other floating layer (harvest-prompt:40,
+       toast-stack:50, leaf-toast-stack:55, bottom-nav:20, radio-widget:16). A modal is meant to be
+       fully modal: nothing else on screen should ever be able to visually sit on top of it or steal
+       a tap meant for one of its buttons (e.g. the "Add to Pouch" button in the seed-reveal modal),
+       regardless of what else happens to be showing underneath when it opens. */
   }
   @keyframes fadeIn{ from{opacity:0;} to{opacity:1;} }
   .modal-sheet{
@@ -877,16 +895,43 @@ const PACK_VISUALS = {
 };
 
 /* ===================== ROOMS: 8-stage garden progression ===================== */
-const ROOMS = [
-  { id:'windowsill',  name:'The Windowsill',                 short:'Windowsill', levelReq:1,  capacity:3,  theme:'sunny' },
-  { id:'kitchen',     name:'The Kitchen Counter',             short:'Kitchen',    levelReq:3,  capacity:5,  theme:'kitchen' },
-  { id:'sunroom',     name:'The Sunroom / Balcony',           short:'Sunroom',    levelReq:7,  capacity:8,  theme:'sunroom' },
-  { id:'patio',       name:'The Backyard Patio',               short:'Patio',      levelReq:12, capacity:10, theme:'patio' },
-  { id:'shed',        name:'The Tool Shed & Potting Bench',    short:'Shed',       levelReq:20, capacity:11, theme:'shed' },
-  { id:'greenhouse',  name:'The Glass Greenhouse (Wing A)',    short:'Greenhouse', levelReq:30, capacity:12, theme:'greenhouse' },
-  { id:'arboretum',   name:'The Tropical Arboretum (Wing B)',  short:'Arboretum',  levelReq:42, capacity:13, theme:'arboretum' },
-  { id:'ecodome',     name:'The Botanical Eco-Dome',           short:'Eco-Dome',   levelReq:55, capacity:15, theme:'ecodome' }
+// potScale steps down room-to-room (statement-sized pot in Room 1 -> small, tidy pots by Room 8),
+// but it is NOT hand-picked -- it's derived below from the pot artwork's real rendered dimensions
+// and each room's row count, so a 3-row grid room is mathematically guaranteed to fit inside the
+// exact same fixed room-scene height as a 1-pot room, never clipped or overlapping.
+const ROOM_ROWS = { single:1, row:1, arc:1, grid3x3:3, grid5x2:2, grid4x3:3, grid5x3:3 };
+const ROOMS_RAW = [
+  { id:'windowsill',  name:'The Windowsill',                 short:'Windowsill', levelReq:1,  capacity:1,  theme:'sunny',      layout:'single',  decor:'🪴', designCap:1.3  },
+  { id:'kitchen',     name:'The Kitchen Counter',             short:'Kitchen',    levelReq:3,  capacity:3,  theme:'kitchen',    layout:'row',     decor:'🫙', designCap:1.1  },
+  { id:'sunroom',     name:'The Sunroom / Balcony',           short:'Sunroom',    levelReq:7,  capacity:5,  theme:'sunroom',    layout:'arc',     decor:'☀️', designCap:0.95 },
+  { id:'patio',       name:'The Backyard Patio',               short:'Patio',      levelReq:12, capacity:7,  theme:'patio',      layout:'arc',     decor:'🦋', designCap:0.82 },
+  { id:'shed',        name:'The Tool Shed & Potting Bench',    short:'Shed',       levelReq:20, capacity:9,  theme:'shed',       layout:'grid3x3', decor:'🧰', designCap:0.55 },
+  { id:'greenhouse',  name:'The Glass Greenhouse (Wing A)',    short:'Greenhouse', levelReq:30, capacity:10, theme:'greenhouse', layout:'grid5x2', decor:'🌿', designCap:0.5  },
+  { id:'arboretum',   name:'The Tropical Arboretum (Wing B)',  short:'Arboretum',  levelReq:42, capacity:12, theme:'arboretum',  layout:'grid4x3', decor:'🌴', designCap:0.45 },
+  { id:'ecodome',     name:'The Botanical Eco-Dome',           short:'Eco-Dome',   levelReq:55, capacity:15, theme:'ecodome',    layout:'grid5x3', decor:'⬡', designCap:0.4  }
 ];
+
+// Every room-scene shares these exact fixed pixel dimensions -- see .room-scene CSS (must stay in
+// sync with the constants below) -- so transitioning between rooms never changes the container
+// size, only what's arranged inside it.
+const ROOM_SCENE_H = 216;        // .room-scene's total (border-box) height
+const ROOM_BORDER_PX = 8;        // must match .room-scene's CSS border-width
+const ROOM_SHELF_H = 32;         // must match .shelf's CSS height
+const ROOM_TOP_CLEARANCE = 10;   // small breathing room reserved above the tallest pot
+const POT_NATIVE_H = 123;        // the plant's bottom-offset(29px) + its tallest rendered height(94px) at potScale 1.0 -- a pot+full-grown-plant's true vertical footprint
+const ROW_PITCH_FACTOR = 0.58;   // how much of one pot's height separates one grid row's anchor from the next (rows interleave slightly, like real potted plants on a shelf)
+const POT_SCALE_SAFETY_MARGIN = 0.92; // never use 100% of the theoretical max -- always leave a little breathing room
+
+// The largest potScale that N stacked rows can use without the top row's plant clipping the top of
+// a fixed-height room-scene (accounting for the shelf and border eating into that same fixed box).
+function maxScaleForRows(rows){
+  const availH = (ROOM_SCENE_H - ROOM_BORDER_PX*2) - ROOM_SHELF_H - ROOM_TOP_CLEARANCE;
+  return (availH / (POT_NATIVE_H * (1 + (rows-1)*ROW_PITCH_FACTOR))) * POT_SCALE_SAFETY_MARGIN;
+}
+const ROOMS = ROOMS_RAW.map(r=>{
+  const rows = ROOM_ROWS[r.layout];
+  return { ...r, rows, potScale: Math.min(r.designCap, maxScaleForRows(rows)) };
+});
 function isRoomUnlocked(roomIndex){ return state.level >= ROOMS[roomIndex].levelReq; }
 function activeRoomId(){ return ROOMS[state.currentRoom].id; }
 function activePots(){ return state.roomPots[activeRoomId()]; }
@@ -894,6 +939,43 @@ function makeInitialRoomPots(){
   const out = {};
   ROOMS.forEach(r=>{ out[r.id] = new Array(r.capacity).fill(null); });
   return out;
+}
+
+// Returns [{left, bottom}] in percent-left / px-bottom, one entry per pot, for the given room's
+// layout type. 'single'/'row' keep every pot flush on the shelf line (bottom:0); 'arc' uses real
+// trigonometry (sin for horizontal spread, cos for the bow/rise toward the ends, like plants
+// fanned along a curved stand) rather than a straight line; the grid layouts space rows using the
+// same POT_NATIVE_H/potScale math that sized potScale in the first place, so rows are always
+// exactly far enough apart for that room's actual (safety-capped) pot size -- never guessed.
+function computePotLayout(room){
+  const n = room.capacity;
+  const availH = (ROOM_SCENE_H - ROOM_BORDER_PX*2) - ROOM_SHELF_H - ROOM_TOP_CLEARANCE;
+  const positions = [];
+  if(room.layout === 'single'){
+    positions.push({ left:50, bottom:0 });
+  } else if(room.layout === 'row'){
+    for(let i=0;i<n;i++) positions.push({ left: 50 + (i-(n-1)/2) * (70/Math.max(1,n-1)), bottom:0 });
+  } else if(room.layout === 'arc'){
+    const spreadDeg = n <= 5 ? 130 : 150;
+    const bowPx = Math.min(availH*0.3, 32);
+    for(let i=0;i<n;i++){
+      const deg = n>1 ? (-spreadDeg/2 + i*(spreadDeg/(n-1))) : 0;
+      const rad = deg * Math.PI/180;
+      positions.push({ left: 50 + Math.sin(rad)*40, bottom: (1-Math.cos(rad)) * bowPx });
+    }
+  } else if(room.layout.indexOf('grid') === 0){
+    const gridDims = { grid3x3:[3,3], grid5x2:[5,2], grid4x3:[4,3], grid5x3:[5,3] };
+    const [cols, rows] = gridDims[room.layout];
+    const rowGap = POT_NATIVE_H * room.potScale * ROW_PITCH_FACTOR;
+    let i = 0;
+    for(let r=0; r<rows && i<n; r++){
+      for(let c=0; c<cols && i<n; c++){
+        positions.push({ left: 8 + (c+0.5)/cols*84, bottom: (rows-1-r) * rowGap });
+        i++;
+      }
+    }
+  }
+  return positions;
 }
 
 
@@ -2707,12 +2789,15 @@ function potVisualInner(potState){
     </svg>
   `;
 }
-function potSVG(index, potState){
+function potSVG(index, potState, pos, scale){
   const type = potState ? SEED_TYPES[potState.type] : null;
+  const style = pos ? `left:${pos.left}%; bottom:${pos.bottom}px;` : '';
   return `
-  <div class="pot-slot" data-pot="${index}">
-    <div class="pot-visual" id="potVisual${index}">${potVisualInner(potState)}</div>
-    <div class="pot-label">${potState ? type.name : 'Empty pot — tap to plant'}</div>
+  <div class="pot-slot" data-pot="${index}" style="${style}">
+    <div class="pot-slot-scale" style="transform:scale(${scale||1});">
+      <div class="pot-visual" id="potVisual${index}">${potVisualInner(potState)}</div>
+      <div class="pot-label">${potState ? type.name : 'Tap to plant'}</div>
+    </div>
   </div>`;
 }
 function animatePotGrowth(index, fromProgress, toProgress){
@@ -2778,16 +2863,18 @@ function potBasisFor(capacity){
 function roomPageHtml(room, index){
   const unlocked = isRoomUnlocked(index);
   const pots = state.roomPots[room.id];
-  const potsHtml = pots.map((p,i)=> potSVG(i,p)).join('');
+  const positions = computePotLayout(room);
+  const potsHtml = pots.map((p,i)=> potSVG(i, p, positions[i], room.potScale)).join('');
   const isWindowsill = room.id === 'windowsill';
   return `
     <div class="room-page">
       <div class="room-scene ${isWindowsill ? 'windowsill weather-'+state.weather : 'theme-'+room.theme} ${unlocked?'':'room-locked'}">
+        <div class="room-decor-icon">${room.decor}</div>
         <div class="room-scene-label">${room.name}</div>
         ${isWindowsill ? `<div class="weather-chip">${WEATHER_ICONS[state.weather]}</div>` : ''}
         ${isWindowsill ? skyDecoSVG(state.weather) + weatherLayerSVG(state.weather) : ''}
         ${isWindowsill ? '<div class="window-mullion-v"></div><div class="window-mullion-h"></div>' : ''}
-        <div class="pots-row" style="--pot-w:${potBasisFor(room.capacity)};">${potsHtml}</div>
+        <div class="pots-row">${potsHtml}</div>
         <div class="shelf"></div>
         ${unlocked ? '' : `
         <div class="room-lock-overlay" data-action="locked-room-tap">
