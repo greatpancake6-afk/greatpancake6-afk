@@ -273,7 +273,15 @@
     padding:2px 7px; border-radius:999px; box-shadow:0 2px 4px rgba(0,0,0,0.2);
     animation: bob 1.4s ease-in-out infinite; white-space:nowrap; z-index:4;
   }
+  .stalled-badge{
+    position:absolute; top:-14px; left:50%; transform:translateX(-50%);
+    width:16px; height:16px; border-radius:50%; background:#e0473f; color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:800;
+    box-shadow:0 2px 4px rgba(0,0,0,0.25); border:1.5px solid #fff;
+    animation: bobCentered 1.4s ease-in-out infinite; z-index:4;
+  }
   @keyframes bob{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(-4px);} }
+  @keyframes bobCentered{ 0%,100%{transform:translateX(-50%) translateY(0);} 50%{transform:translateX(-50%) translateY(-4px);} }
   @keyframes sparkle{ 0%,100%{opacity:0.4; transform:scale(0.9);} 50%{opacity:1; transform:scale(1.15);} }
   @keyframes sway{ 0%,100%{ transform: rotate(-2.5deg); } 50%{ transform: rotate(2.5deg); } }
   @keyframes floatCloud{ 0%{ transform: translateX(0); } 100%{ transform: translateX(-18px); } }
@@ -323,11 +331,22 @@
 
   .seed-card{ display:flex; align-items:center; gap:12px; background:var(--paper); border:2px solid var(--line); border-radius:18px; padding:10px 12px; margin-bottom:10px; }
   .seed-card.free{ border-color:var(--gold); background:#FFF8E8; }
-  .seed-icon-wrap{ width:50px; height:50px; border-radius:14px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .seed-icon-wrap{ width:50px; height:50px; border-radius:14px; display:flex; align-items:center; justify-content:center; flex-shrink:0; position:relative; }
+  .seed-lock-badge{
+    position:absolute; top:-5px; right:-5px; width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid var(--line); display:flex; align-items:center; justify-content:center;
+    font-size:9px; box-shadow:0 1px 3px rgba(0,0,0,0.2);
+  }
   .seed-info{flex:1; min-width:0;}
   .seed-name{font-weight:800; font-size:14px; color:var(--ink);}
+  .seed-qty{ font-weight:800; font-size:11.5px; color:var(--moss-dark); background:var(--moss-light); padding:1px 6px; border-radius:999px; margin-left:2px; }
   .seed-tag{ display:inline-block; margin-top:2px; font-size:9.5px; font-weight:800; letter-spacing:0.3px; padding:2px 7px; border-radius:999px; color:#fff; }
   .seed-meta{ font-size:11px; color:var(--ink-soft); font-weight:700; margin-top:3px;}
+  .seed-requirement-box{
+    margin-top:12px; padding:10px 14px; border-radius:14px; font-size:12px; font-weight:700;
+    background:var(--paper); border:2px solid var(--line); color:var(--ink-soft);
+  }
+  .seed-requirement-box.locked{ background:#FDECEA; border-color:#e0473f; color:#a83a33; }
   .seed-actions{ display:flex; flex-direction:column; gap:6px; }
   .empty-state{ text-align:center; padding: 30px 10px; color:var(--ink-soft); }
 
@@ -415,6 +434,15 @@
     max-height:82%; overflow-y:auto; overflow-x:hidden; box-shadow: 0 -10px 30px rgba(0,0,0,0.25); animation: slideUp 0.22s ease;
   }
   @keyframes slideUp{ from{ transform:translateY(30px); opacity:0;} to{transform:translateY(0); opacity:1;} }
+  /* Centered celebratory modals (level-up, new species, seed reveal, pack-opening) pop into the
+     middle of the dimmed screen instead of sliding up as a bottom sheet -- same dimmed backdrop,
+     just a different resting position and entrance animation befitting a celebration moment. */
+  .modal-backdrop.centered{ align-items:center; padding:20px; }
+  .modal-backdrop.centered .modal-sheet{
+    border-radius:26px; max-height:88%; padding: 22px 20px calc(22px + env(safe-area-inset-bottom));
+    animation: popIn 0.28s cubic-bezier(.34,1.56,.64,1);
+  }
+  @keyframes popIn{ from{ transform:scale(0.85); opacity:0;} to{ transform:scale(1); opacity:1;} }
   .modal-handle{ width:40px; height:5px; background:var(--line); border-radius:99px; margin:0 auto 14px; }
   .modal-title{ font-size:19px; font-weight:800; margin:0 0 4px;}
   .modal-sub{ font-size:12.5px; color:var(--ink-soft); font-weight:700; margin-bottom:16px;}
@@ -1002,6 +1030,22 @@ Object.keys(TIER_DEFAULTS).forEach(tierKey=>{
   });
 });
 
+// Special seeds: a growth requirement that must be actively met or the plant's progress freezes.
+// First requirement type -- a specific radio song must be playing. Picked from the Uncommon and
+// Rare tiers (skipping the guaranteed-free starter seed), two apiece from the shop-only, map-only,
+// and both-pools categories, using only 4 of the 10 available tracks (reused across a couple of
+// seeds each) rather than all of them.
+[
+  ['uncommon_1', 'rainy-window'],   // Daisy Chain (shop)
+  ['rare_1',     'moonlit-sonata'], // Crimson Orchid (shop)
+  ['uncommon_5', 'neon-highway'],   // Coral Bud (map)
+  ['rare_4',     'meadow-breeze'],  // Amber Tulip (map)
+  ['uncommon_9', 'rainy-window'],   // Lilac Bell (both)
+  ['rare_7',     'moonlit-sonata']  // Azure Aster (both)
+].forEach(([key, songId])=>{
+  if(SEED_TYPES[key]) SEED_TYPES[key].requirement = { type:'song', songId };
+});
+
 const SHOP_PACKS = [
   { id:'sprout',  name:'Sprout Pack',    cost:15,  desc:'Mostly Common seeds, small chance of Uncommon.', weights:{common:65, uncommon:30, rare:5} },
   { id:'garden',  name:'Garden Pack',    cost:40,  desc:'Uncommon guaranteed floor, chance of rarer finds.', weights:{uncommon:45, rare:30, epic:18, legendary:7} },
@@ -1040,8 +1084,12 @@ const ROOM_BORDER_PX = 8;        // must match .room-scene's CSS border-width
 const ROOM_SHELF_H = 34;         // must match .shelf's CSS height
 const ROOM_TOP_CLEARANCE = 12;   // small breathing room reserved above the tallest pot
 const POT_NATIVE_H = 123;        // the plant's bottom-offset(29px) + its tallest rendered height(94px) at potScale 1.0 -- a pot+full-grown-plant's true vertical footprint
-const ROW_PITCH_FACTOR = 0.78;   // loosened back up -- rows sit with real separation instead of interleaving/overlapping, so plant graphics never crowd or clip into each other
+const POT_NATIVE_W = 101;        // the pot SVG's native rendered width at potScale 1.0
+const ROW_PITCH_FACTOR = 0.78;   // rows sit with real separation, so plant graphics never crowd or clip into each other
 const POT_SCALE_SAFETY_MARGIN = 0.9; // never use 100% of the theoretical max -- always leave a little breathing room
+const MIN_POT_GAP_PX = 16;       // guaranteed minimum visible gap between any two adjacent pots -- pots must never touch
+const ASSUMED_CONTENT_WIDTH_PX = 340; // conservative (narrow-end) mobile content width, used to convert that gap into safe percentage-based spacing
+const ROOM_GRID_COLS = { grid3x3:3, grid5x2:5, grid4x3:4, grid5x3:5 };
 
 // The largest potScale that N stacked rows can use without the top row's plant clipping the top of
 // a fixed-height room-scene (accounting for the shelf and border eating into that same fixed box).
@@ -1049,10 +1097,27 @@ function maxScaleForRows(rows){
   const availH = (ROOM_SCENE_H - ROOM_BORDER_PX*2) - ROOM_SHELF_H - ROOM_TOP_CLEARANCE;
   return (availH / (POT_NATIVE_H * (1 + (rows-1)*ROW_PITCH_FACTOR))) * POT_SCALE_SAFETY_MARGIN;
 }
+// The largest potScale that N side-by-side columns can use while guaranteeing MIN_POT_GAP_PX of
+// real, un-overlapping space between every adjacent pair -- this is what actually prevents pots
+// from touching (the row-height cap above only prevents vertical clipping, not horizontal overlap).
+function maxScaleForCols(cols){
+  if(!cols || cols <= 1) return Infinity;
+  const usableWidthPx = ASSUMED_CONTENT_WIDTH_PX * 0.88;
+  return ((usableWidthPx - (cols-1)*MIN_POT_GAP_PX) / (cols*POT_NATIVE_W)) * POT_SCALE_SAFETY_MARGIN;
+}
 const ROOMS = ROOMS_RAW.map(r=>{
   const rows = ROOM_ROWS[r.layout];
-  return { ...r, rows, potScale: Math.min(r.designCap, maxScaleForRows(rows)) };
+  const cols = r.layout === 'row' ? r.capacity : ROOM_GRID_COLS[r.layout];
+  const scale = Math.min(r.designCap, maxScaleForRows(rows), maxScaleForCols(cols));
+  return { ...r, rows, cols, potScale: scale };
 });
+// A room-specific safety cap (e.g. a tightly-packed 3-across counter) can occasionally end up
+// stricter than a later, roomier room's own cap -- enforce a final monotonic non-increasing pass
+// so "statement pot in Room 1, smaller by Room 8" always holds room-to-room, never reduced twice.
+(function enforceMonotonicPotScale(){
+  let runningMax = Infinity;
+  ROOMS.forEach(r=>{ r.potScale = Math.min(r.potScale, runningMax); runningMax = r.potScale; });
+})();
 function isRoomUnlocked(roomIndex){ return !!state.roomUnlocked[ROOMS[roomIndex].id]; }
 function activeRoomId(){ return ROOMS[state.currentRoom].id; }
 function activePots(){ return state.roomPots[activeRoomId()]; }
@@ -1075,7 +1140,12 @@ function computePotLayout(room){
   if(room.layout === 'single'){
     positions.push({ left:50, bottom:0 });
   } else if(room.layout === 'row'){
-    for(let i=0;i<n;i++) positions.push({ left: 50 + (i-(n-1)/2) * (68/Math.max(1,n-1)), bottom:0 });
+    // Spacing is derived from this room's actual (safety-capped) pot width plus MIN_POT_GAP_PX,
+    // not a fixed guess -- the same formula that capped potScale in the first place, so pots are
+    // mathematically guaranteed not to touch regardless of how many are in the row.
+    const gapPct = ((POT_NATIVE_W*room.potScale + MIN_POT_GAP_PX) / ASSUMED_CONTENT_WIDTH_PX) * 100;
+    const totalSpread = gapPct * (n-1);
+    for(let i=0;i<n;i++) positions.push({ left: 50 + (i-(n-1)/2) * (n>1 ? totalSpread/(n-1) : 0), bottom:0 });
   } else if(room.layout === 'arc'){
     const spreadDeg = n <= 5 ? 130 : 150;
     const bowPx = Math.min(availH*0.3, 32);
@@ -1088,10 +1158,13 @@ function computePotLayout(room){
     const gridDims = { grid3x3:[3,3], grid5x2:[5,2], grid4x3:[4,3], grid5x3:[5,3] };
     const [cols, rows] = gridDims[room.layout];
     const rowGap = POT_NATIVE_H * room.potScale * ROW_PITCH_FACTOR;
+    // Same gap-guaranteed approach horizontally as 'row' above.
+    const colGapPct = ((POT_NATIVE_W*room.potScale + MIN_POT_GAP_PX) / ASSUMED_CONTENT_WIDTH_PX) * 100;
+    const colSpread = colGapPct * (cols-1);
     let i = 0;
     for(let r=0; r<rows && i<n; r++){
       for(let c=0; c<cols && i<n; c++){
-        positions.push({ left: 9 + (c+0.5)/cols*82, bottom: (rows-1-r) * rowGap });
+        positions.push({ left: 50 + (c-(cols-1)/2) * (cols>1 ? colSpread/(cols-1) : 0), bottom: (rows-1-r) * rowGap });
         i++;
       }
     }
@@ -1521,6 +1594,7 @@ let state = {
   pendingLevelPacks: [],
   isLevelPackFlow: false,
   activePotId: null,
+  detailSeedType: null,
   compostTargetUid: null,
   inspectPotIndex: null,
   modal: null,
@@ -1627,17 +1701,25 @@ function toggleSfx(){ state.settings.sfx = !state.settings.sfx; render(); }
 // each "song" is a short, looping riff built from a distinct scale/waveform/tempo per genre.
 function noteFreq(semitonesFromA4){ return 440 * Math.pow(2, semitonesFromA4/12); }
 const RADIO_SONGS = [
-  { name:'Rainy Window',    genre:'Lo-Fi',     notes:[-9,-6,-4,-2,1,3,1,-2],          tempoMs:520, wave:'triangle', gain:0.05  },
-  { name:'Blue Note Café',  genre:'Jazz',      notes:[-9,-5,-2,2,5,2,-2,-5],          tempoMs:430, wave:'sine',     gain:0.045 },
-  { name:'Garage Static',   genre:'Rock',      notes:[-17,-17,-14,-12,-17,-17,-19,-17], tempoMs:260, wave:'square', gain:0.045 },
-  { name:'Sugar Rush',      genre:'Pop',       notes:[3,7,10,7,8,12,10,7],            tempoMs:300, wave:'triangle', gain:0.05  },
-  { name:'Moonlit Sonata',  genre:'Classical', notes:[-9,-7,-5,-4,-2,-4,-5,-7],       tempoMs:480, wave:'sine',     gain:0.045 },
-  { name:'Island Skank',    genre:'Reggae',    notes:[-9,-2,-9,-2,0,-2,-4,-2],        tempoMs:340, wave:'triangle', gain:0.045 },
-  { name:'Neon Highway',    genre:'Synthwave', notes:[-12,-9,-5,0,-14,-10,-7,-4],     tempoMs:220, wave:'sawtooth', gain:0.04  },
-  { name:'Crossroads',      genre:'Blues',     notes:[-9,-6,-4,-3,-2,1,3,1],          tempoMs:400, wave:'sine',     gain:0.05  },
-  { name:'Meadow Breeze',   genre:'Folk',      notes:[-7,-5,-2,0,2,0,-2,-5],          tempoMs:440, wave:'triangle', gain:0.045 },
-  { name:'Drifting Clouds', genre:'Ambient',   notes:[-9,-2,-5,0,-4,3,-2,-5],         tempoMs:700, wave:'sine',     gain:0.035 }
+  { id:'rainy-window',    name:'Rainy Window',    genre:'Lo-Fi',     notes:[-9,-6,-4,-2,1,3,1,-2],          tempoMs:520, wave:'triangle', gain:0.05  },
+  { id:'blue-note-cafe',  name:'Blue Note Café',  genre:'Jazz',      notes:[-9,-5,-2,2,5,2,-2,-5],          tempoMs:430, wave:'sine',     gain:0.045 },
+  { id:'garage-static',   name:'Garage Static',   genre:'Rock',      notes:[-17,-17,-14,-12,-17,-17,-19,-17], tempoMs:260, wave:'square', gain:0.045 },
+  { id:'sugar-rush',      name:'Sugar Rush',      genre:'Pop',       notes:[3,7,10,7,8,12,10,7],            tempoMs:300, wave:'triangle', gain:0.05  },
+  { id:'moonlit-sonata',  name:'Moonlit Sonata',  genre:'Classical', notes:[-9,-7,-5,-4,-2,-4,-5,-7],       tempoMs:480, wave:'sine',     gain:0.045 },
+  { id:'island-skank',    name:'Island Skank',    genre:'Reggae',    notes:[-9,-2,-9,-2,0,-2,-4,-2],        tempoMs:340, wave:'triangle', gain:0.045 },
+  { id:'neon-highway',    name:'Neon Highway',    genre:'Synthwave', notes:[-12,-9,-5,0,-14,-10,-7,-4],     tempoMs:220, wave:'sawtooth', gain:0.04  },
+  { id:'crossroads',      name:'Crossroads',      genre:'Blues',     notes:[-9,-6,-4,-3,-2,1,3,1],          tempoMs:400, wave:'sine',     gain:0.05  },
+  { id:'meadow-breeze',   name:'Meadow Breeze',   genre:'Folk',      notes:[-7,-5,-2,0,2,0,-2,-5],          tempoMs:440, wave:'triangle', gain:0.045 },
+  { id:'drifting-clouds', name:'Drifting Clouds', genre:'Ambient',   notes:[-9,-2,-5,0,-4,3,-2,-5],         tempoMs:700, wave:'sine',     gain:0.035 }
 ];
+// Centralized Global Audio Manager: the single source of truth for "what's playing right now",
+// read by the music-growth-requirement system below. A thin wrapper around state.radio rather
+// than a duplicate copy of it, so there is exactly one place that can ever disagree with itself.
+const AudioManager = {
+  get currentPlayingTrack(){
+    return state.radio.isPlaying ? RADIO_SONGS[state.radio.songIndex].id : null;
+  }
+};
 let radioTimer = null;
 let radioNoteTimer = null;
 function stopRadioPlayback(){
@@ -1684,6 +1766,10 @@ function cycleRadioSong(){
   const label = document.getElementById('radioLabel');
   if(label) label.textContent = song.name;
   toast(`📻 Now playing: ${song.name} (${song.genre})`);
+  // The track just changed -- immediately re-check every music-requirement plant rather than
+  // waiting for the next periodic tick, so a plant that no longer matches stalls right away (and
+  // one that now matches starts growing right away) instead of lagging behind the song change.
+  musicGrowthTick();
 }
 
 /* ===================== WALK SESSION: Wake Lock + accelerometer step counter ===================== */
@@ -2971,6 +3057,7 @@ function plantSVG(potState){
 /* ===================== POT RENDERING (fixed shelf anchor, tap-to-inspect) ===================== */
 function potVisualInner(potState){
   const ready = potState && (potState.progress >= SEED_TYPES[potState.type].threshold);
+  const stalled = potState && potState.stalled && !ready;
   // BUG FIX (pot growth layering, refined): putting the whole plant in front of the whole pot
   // (an earlier pass) fixed the pot fully hiding the plant at early growth, but overcorrected —
   // the bottom of the stem then visibly floated ON TOP of the pot's soil/rim instead of looking
@@ -2984,6 +3071,7 @@ function potVisualInner(potState){
   // still reads clearly in front, since it extends outside that ellipse's silhouette.
   return `
     ${ready ? `<div class="ready-badge">✨ Ready!</div>` : ''}
+    ${stalled ? `<div class="stalled-badge" title="Needs its required song playing">!</div>` : ''}
     <svg width="101" height="65" viewBox="0 0 88 58" style="position:absolute; left:50%; bottom:0; transform:translateX(-50%); z-index:1;">
       <ellipse cx="44" cy="14" rx="34" ry="7" fill="#3a2a1c" opacity="0.18"/>
       <path d="M10 12 L18 54 Q44 60 70 54 L78 12 Z" fill="var(--terracotta)" stroke="var(--terracotta-dark)" stroke-width="2" stroke-linejoin="round"/>
@@ -3213,20 +3301,29 @@ function renderGarden(){
   `;
 }
 
+function groupSeedsByType(items){
+  const order = [];
+  const groups = {};
+  items.forEach(item=>{
+    if(!groups[item.type]){ groups[item.type] = []; order.push(item.type); }
+    groups[item.type].push(item);
+  });
+  return order.map(type=>({ type, items: groups[type], count: groups[type].length }));
+}
 function renderPouch(){
-  const items = state.pouch.map(item=>{
-    const type = SEED_TYPES[item.type];
+  const grouped = groupSeedsByType(state.pouch);
+  const items = grouped.map(g=>{
+    const type = SEED_TYPES[g.type];
+    const uid = g.items[0].uid; // representative instance -- Details/Compost act on one at a time
     return `
-    <div class="seed-card" data-seed-uid="${item.uid}">
-      <div class="seed-icon-wrap ${type.bg}">${seedIcon(type)}</div>
+    <div class="seed-card" data-seed-uid="${uid}">
+      <div class="seed-icon-wrap ${type.bg}">${seedIcon(type)}${type.requirement ? '<div class="seed-lock-badge">🔒</div>' : ''}</div>
       <div class="seed-info">
-        <div class="seed-name">${type.name}</div>
-        <div class="seed-tag ${type.tag}">${type.rarityLabel}</div>
-        <div class="seed-meta">${type.threshold} steps to grow</div>
+        <div class="seed-name">${type.name}${g.count>1 ? ` <span class="seed-qty">×${g.count}</span>` : ''}</div>
       </div>
       <div class="seed-actions">
-        <button class="pill-btn primary" data-action="plant-request" data-uid="${item.uid}">Plant</button>
-        <button class="pill-btn soft" data-action="compost" data-uid="${item.uid}">Compost +${type.compost}¢</button>
+        <button class="pill-btn primary" data-action="open-seed-details" data-type="${g.type}">Details</button>
+        <button class="pill-btn soft" data-action="compost" data-uid="${uid}">Compost +${type.compost}¢</button>
       </div>
     </div>`;
   }).join('');
@@ -3235,7 +3332,7 @@ function renderPouch(){
     <div class="pouch-header">
       <div>
         <div class="screen-title">Seed Pouch</div>
-        <div class="screen-sub" style="margin-bottom:0;">Everything you're carrying, ready to plant.</div>
+        <div class="screen-sub" style="margin-bottom:0;">Your inventory and encyclopedia — plant by tapping an empty pot in the garden.</div>
       </div>
       <div class="composter-corner" id="composterCorner" title="Composter">
         <svg width="20" height="20" viewBox="0 0 40 40"><path d="M8 14L10 34C10 36 30 36 30 34L32 14" fill="#B8834F" stroke="#8f5f33" stroke-width="1.6"/><ellipse cx="20" cy="14" rx="14" ry="4" fill="#DCB27E" stroke="#8f5f33" stroke-width="1.6"/></svg>
@@ -3245,10 +3342,8 @@ function renderPouch(){
       <div class="seed-icon-wrap ${commonType.bg}">${seedIcon(commonType)}</div>
       <div class="seed-info">
         <div class="seed-name">${commonType.name}</div>
-        <div class="seed-tag ${commonType.tag}">ALWAYS FREE</div>
-        <div class="seed-meta">${commonType.threshold} steps to grow · never runs out</div>
       </div>
-      <div class="seed-actions"><button class="pill-btn gold" data-action="plant-request" data-uid="free-common">Plant</button></div>
+      <div class="seed-actions"><button class="pill-btn primary" data-action="open-seed-details" data-type="common">Details</button></div>
     </div>
     ${items || `<div class="empty-state">No extra seeds yet.<br/>Visit the shop or explore the Map for rarer finds! 🌱</div>`}
   `;
@@ -3329,7 +3424,7 @@ function renderLevelUpModal(){
     rows.push(`<div class="prize-row"><span class="prize-icon">🔑</span><span class="prize-label">Key to ${name}</span><span class="prize-value">New!</span></div>`);
   });
   return `
-  <div class="modal-backdrop" id="backdrop">
+  <div class="modal-backdrop centered" id="backdrop">
     <div class="modal-sheet level-up-sheet" style="position:relative; text-align:center;">
       <div class="level-up-banner">
         <div class="level-up-spark">✨</div>
@@ -3399,20 +3494,45 @@ function renderPotInspectModal(){
   </div>`;
 }
 
+function renderSeedDetailsModal(){
+  const type = SEED_TYPES[state.detailSeedType];
+  if(!type) return '';
+  const reqSong = type.requirement ? RADIO_SONGS.find(s=> s.id === type.requirement.songId) : null;
+  const reqText = reqSong
+    ? `🔒 Only grows while "${reqSong.name}" (${reqSong.genre}) is playing on the radio`
+    : 'No requirements';
+  return `
+  <div class="modal-backdrop centered" id="backdrop">
+    <div class="modal-sheet" style="position:relative; text-align:center;">
+      <div class="close-x" data-action="close-modal">✕</div>
+      <div class="modal-handle"></div>
+      <div style="display:flex; justify-content:center; margin:10px 0;">
+        <div class="seed-icon-wrap ${type.bg}" style="width:74px;height:74px;border-radius:20px; position:relative;">${seedIcon(type)}${type.requirement ? '<div class="seed-lock-badge">🔒</div>' : ''}</div>
+      </div>
+      <div class="seed-name" style="font-size:16px;">${type.name}</div>
+      <div class="seed-tag ${type.tag}">${type.rarityLabel}</div>
+      <div class="seed-meta" style="margin-top:6px;">${type.threshold} steps to grow</div>
+      <div class="seed-requirement-box ${type.requirement ? 'locked' : ''}">${reqText}</div>
+      <div class="modal-sub" style="margin-top:12px; font-style:italic;">"${type.fact}"</div>
+    </div>
+  </div>`;
+}
 function renderPlantPickerModal(){
   if(!state.activePotId) return '';
   const room = ROOMS[state.activePotId.roomIndex];
   const commonType = SEED_TYPES.common;
-  const items = state.pouch.map(item=>{
-    const type = SEED_TYPES[item.type];
+  const grouped = groupSeedsByType(state.pouch);
+  const items = grouped.map(g=>{
+    const type = SEED_TYPES[g.type];
+    const uid = g.items[0].uid; // planting consumes exactly one instance of this type
     return `
-    <div class="seed-card compact" data-seed-uid="${item.uid}">
-      <div class="seed-icon-wrap ${type.bg}">${seedIcon(type)}</div>
+    <div class="seed-card compact" data-seed-uid="${uid}">
+      <div class="seed-icon-wrap ${type.bg}">${seedIcon(type)}${type.requirement ? '<div class="seed-lock-badge">🔒</div>' : ''}</div>
       <div class="seed-info">
-        <div class="seed-name">${type.name}</div>
+        <div class="seed-name">${type.name}${g.count>1 ? ` <span class="seed-qty">×${g.count}</span>` : ''}</div>
         <div class="seed-tag ${type.tag}">${type.rarityLabel}</div>
       </div>
-      <button class="pill-btn primary" data-action="plant-request" data-uid="${item.uid}">Plant</button>
+      <button class="pill-btn primary" data-action="plant-request" data-uid="${uid}">Plant</button>
     </div>`;
   }).join('');
   return `
@@ -3443,6 +3563,7 @@ function renderModal(){
   if(state.modal === 'compostConfirm'){ root.innerHTML = renderCompostConfirmModal(); return; }
   if(state.modal === 'potInspect'){ root.innerHTML = renderPotInspectModal(); return; }
   if(state.modal === 'plantPicker'){ root.innerHTML = renderPlantPickerModal(); return; }
+  if(state.modal === 'seedDetails'){ root.innerHTML = renderSeedDetailsModal(); return; }
 
   if(state.modal === 'shop'){
     root.innerHTML = `
@@ -3478,7 +3599,7 @@ function renderModal(){
     const isLegendary = revealType.tierKey === 'legendary';
     const v = PACK_VISUALS[state.activePackId] || PACK_VISUALS.sprout;
     root.innerHTML = `
-    <div class="modal-backdrop">
+    <div class="modal-backdrop centered">
       <div class="modal-sheet" style="position:relative; text-align:center;">
         <div class="modal-handle"></div>
         <div class="pack-label-banner" style="background:${v.secondary};">${v.label}</div>
@@ -3501,7 +3622,7 @@ function renderModal(){
   if(state.modal === 'burst'){
     const type = SEED_TYPES[state.revealSeed];
     root.innerHTML = `
-    <div class="modal-backdrop">
+    <div class="modal-backdrop centered">
       <div class="modal-sheet" style="position:relative; text-align:center;">
         <div class="modal-handle"></div>
         <div class="modal-title">✨ Something's emerging...</div>
@@ -3520,7 +3641,7 @@ function renderModal(){
   if(state.modal === 'reveal'){
     const type = SEED_TYPES[state.revealSeed];
     root.innerHTML = `
-    <div class="modal-backdrop" id="backdrop">
+    <div class="modal-backdrop centered" id="backdrop">
       <div class="modal-sheet" style="position:relative; text-align:center;">
         <div class="modal-handle"></div>
         <div class="modal-title">You found a seed!</div>
@@ -3540,7 +3661,7 @@ function renderModal(){
   if(state.modal === 'newSpecies'){
     const type = SEED_TYPES[state.celebrateSpecies];
     root.innerHTML = `
-    <div class="modal-backdrop" id="backdrop">
+    <div class="modal-backdrop centered" id="backdrop">
       <div class="modal-sheet" style="position:relative; text-align:center; overflow:hidden;">
         <div class="confetti-layer">${confettiDots()}</div>
         <div class="modal-handle"></div>
@@ -3678,7 +3799,22 @@ function completeTear(leftHalf, rightHalf){
   setTimeout(()=>{
     state.modal = 'burst';
     render();
-    setTimeout(()=>{ state.modal = 'reveal'; render(); }, 550);
+    setTimeout(()=>{
+      // Unlock celebration flow: a brand-new species skips the standard "You found a seed!"
+      // reveal card entirely and goes straight to the New Species Discovered celebration -- since
+      // there's no separate "tap Collect" step on this path, the seed is added to the pouch here.
+      // An already-owned species still gets the normal reveal card (with its own Collect step).
+      const seedKey = state.revealSeed;
+      if(!state.discovered[seedKey]){
+        state.pouch.push({uid: seedUid++, type: seedKey});
+        checkDiscovery(seedKey);
+        state.modal = 'newSpecies';
+        state.celebrateSpecies = seedKey;
+      } else {
+        state.modal = 'reveal';
+      }
+      render();
+    }, 550);
   }, 220);
 }
 
@@ -3696,6 +3832,9 @@ function addSteps(n){
     state.roomPots[room.id] = state.roomPots[room.id].map((p,i)=>{
       if(!p) return p;
       const type = SEED_TYPES[p.type];
+      // Music-requirement seeds don't grow from steps at all -- see musicGrowthTick(), which is
+      // the only thing that ever advances their progress, gated on the right song playing.
+      if(type.requirement) return p;
       const newProgress = Math.min(type.threshold, p.progress + n);
       if(newProgress > p.progress){
         const update = {index:i, from:p.progress, to:newProgress, threshold:type.threshold};
@@ -3712,6 +3851,40 @@ function addSteps(n){
     render();
   }
   return { growthUpdates: allReadyEvents, leveled };
+}
+
+// Growth loop for music-requirement seeds: uses real timestamp differences (Date.now(), not a
+// frame/tick counter) so elapsed time is computed correctly even if the tab was throttled or
+// backgrounded between ticks, and so a persisted/reloaded pot's stalled status and progress would
+// still evaluate accurately from wherever its lastMusicTickAt was left off.
+const MUSIC_GROWTH_FULL_SECONDS = 90; // continuous correct-song playback time to fully grow one
+function musicGrowthTick(){
+  const now = Date.now();
+  const playing = AudioManager.currentPlayingTrack;
+  const activeId = activeRoomId();
+  let visualsChanged = false;
+  ROOMS.forEach(room=>{
+    state.roomPots[room.id].forEach((p, i)=>{
+      if(!p) return;
+      const type = SEED_TYPES[p.type];
+      if(!type.requirement || type.requirement.type !== 'song') return;
+      if(!p.lastMusicTickAt) p.lastMusicTickAt = now;
+      const elapsedMs = now - p.lastMusicTickAt;
+      p.lastMusicTickAt = now;
+      if(p.progress >= type.threshold) return; // fully grown already
+      const matches = playing === type.requirement.songId;
+      if(!matches){
+        if(!p.stalled){ p.stalled = true; if(room.id === activeId) visualsChanged = true; }
+        return; // growth paused entirely while the wrong (or no) song plays
+      }
+      if(p.stalled){ p.stalled = false; visualsChanged = true; }
+      const rate = type.threshold / MUSIC_GROWTH_FULL_SECONDS; // progress units per second
+      const from = p.progress;
+      p.progress = Math.min(type.threshold, p.progress + (elapsedMs/1000) * rate);
+      if(room.id === activeId && p.progress > from){ animatePotGrowth(i, from, p.progress); visualsChanged = true; }
+    });
+  });
+  if(visualsChanged && state.tab === 'garden' && !state.modal) render();
 }
 function simulateSteps(){
   const { growthUpdates, leveled } = addSteps(500);
@@ -3732,6 +3905,11 @@ function simulateSteps(){
 function requestPlantForPot(index){
   state.activePotId = { roomIndex: state.currentRoom, potIndex: index };
   state.modal = 'plantPicker';
+  render();
+}
+function openSeedDetails(typeKey){
+  state.detailSeedType = typeKey;
+  state.modal = 'seedDetails';
   render();
 }
 function openPotInspect(index){
@@ -3757,6 +3935,12 @@ function plantSeed(uid){
   }
   state.activePotId = null;
   state.modal = null;
+  // Music-requirement seeds track real elapsed time (not steps) since planting -- see
+  // musicGrowthTick() -- so the clock starts the moment it goes in the soil.
+  if(SEED_TYPES[pots[idx].type].requirement){
+    pots[idx].lastMusicTickAt = Date.now();
+    pots[idx].stalled = AudioManager.currentPlayingTrack !== SEED_TYPES[pots[idx].type].requirement.songId;
+  }
   playSfx('plant');
   toast(`🌱 Planted in ${room.name}!`);
   render();
@@ -3849,14 +4033,9 @@ function collectRevealedSeed(){
   const seedKey = state.revealSeed;
 
   function finish(){
+    // Reached only for an already-discovered species -- a brand-new one skips the reveal card
+    // entirely (see completeTear), so there is no newSpecies branch to check here anymore.
     state.pouch.push({uid: seedUid++, type: seedKey});
-    const isNew = checkDiscovery(seedKey);
-    if(isNew){
-      state.modal = 'newSpecies';
-      state.celebrateSpecies = seedKey;
-      render();
-      return;
-    }
     if(state.isLevelPackFlow && state.pendingLevelPacks.length > 0){
       openNextLevelPack();
       return;
@@ -3923,6 +4102,7 @@ function handleClick(e){
       if(action === 'harvest-pot'){ harvestPot(parseInt(actionEl.dataset.idx)); state.modal = null; render(); return; }
       if(action === 'plant-request'){ plantSeed(actionEl.dataset.uid); return; }
       if(action === 'compost'){ requestCompost(actionEl.dataset.uid); return; }
+      if(action === 'open-seed-details'){ openSeedDetails(actionEl.dataset.type); return; }
       if(action === 'confirm-compost'){ confirmCompostAnimated(); return; }
       if(action === 'enable-location'){ requestLocation(); return; }
       if(action === 'enable-compass'){ requestCompass(); return; }
@@ -3976,6 +4156,7 @@ initStreak();
 loadMapPersistence();
 loadProgressState();
 setInterval(cycleWeather, 14000);
+setInterval(musicGrowthTick, 2500);
 mapWorldTimer = setInterval(mapWorldTick, MAP_TICK_MS);
 // Reconcile against Date.now() whenever the app regains focus/visibility — handles the device
 // sleeping, the tab being backgrounded, or the clock otherwise drifting while we were away.
