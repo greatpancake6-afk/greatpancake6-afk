@@ -77,6 +77,12 @@
     clip-path: circle(50%);
   }
   .level-chip{ background:var(--moss); color:#fff; font-weight:800; font-size:10.5px; padding:4px 9px; border-radius:999px; box-shadow:0 2px 0 var(--moss-dark); }
+  /* The level chip doubles as a sideways progress bar: a fill div grows from 0-100% width behind
+     the "Lv N" label as totalSteps approaches the next level's requirement, patched directly by
+     render() (see the level-progress block there) rather than re-rendered from scratch each time. */
+  .level-progress-btn{ position:relative; overflow:hidden; cursor:pointer; min-width:44px; text-align:center; }
+  .level-progress-fill{ position:absolute; top:0; left:0; bottom:0; width:0%; background:var(--gold); opacity:0.9; transition:width 0.5s ease; z-index:0; }
+  .level-progress-text{ position:relative; z-index:1; }
 
   .content{ flex:1; overflow-y:auto; padding: 4px 16px 110px; position:relative; z-index:1; -webkit-overflow-scrolling:touch; }
   .content::-webkit-scrollbar{width:0;}
@@ -220,6 +226,17 @@
   }
   .sky-deco{ position:absolute; inset:0; z-index:0; }
   .weather-layer{ position:absolute; inset:0; z-index:1; pointer-events:none; }
+  /* Windowsill dynamic ambience: two-layer crossfade containers for both the time-of-day tint and
+     the weather effect, each opacity-transitioned (never re-rendered/snapped) by
+     windowsillTimeTick()/crossfadeWeatherLayer() in JS. See the TIME OF DAY section for the tick
+     logic -- this is purely the visual/positioning half. */
+  .time-tint-layer{ position:absolute; inset:0; z-index:1; pointer-events:none; opacity:0; transition:opacity 2.5s ease-in-out; }
+  .weather-crossfade-layer{ position:absolute; inset:0; z-index:1; pointer-events:none; opacity:0; transition:opacity 2s ease-in-out; }
+  .time-chip{
+    position:absolute; top:8px; right:8px; z-index:3;
+    background:rgba(255,255,255,0.8); border-radius:999px; padding:3px 8px;
+    font-size:9.5px; font-weight:800; color:var(--ink); display:flex; align-items:center; gap:3px;
+  }
   /* Pots are positioned individually via inline left%/bottom-px styles computed by
      computePotLayout() (JS) -- this is purely the positioning context for them. */
   .pots-row{ position:relative; flex:1; z-index:2; overflow-y:auto; overflow-x:hidden; }
@@ -273,15 +290,24 @@
     padding:2px 7px; border-radius:999px; box-shadow:0 2px 4px rgba(0,0,0,0.2);
     animation: bob 1.4s ease-in-out infinite; white-space:nowrap; z-index:4;
   }
-  .stalled-badge{
-    position:absolute; top:-14px; left:50%; transform:translateX(-50%);
-    width:16px; height:16px; border-radius:50%; background:#e0473f; color:#fff;
-    display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:800;
-    box-shadow:0 2px 4px rgba(0,0,0,0.25); border:1.5px solid #fff;
-    animation: bobCentered 1.4s ease-in-out infinite; z-index:4;
+  /* Stalled plants (waiting for their required song) get a gentle, drifting "Zzz" instead of a
+     harsh warning badge -- reads as "resting/sleeping" rather than an error, matching Flora's
+     no-punishment tone. Three staggered spans drift up-and-out and fade, looping continuously. */
+  .stalled-zzz{ position:absolute; top:-6px; left:50%; width:0; height:0; pointer-events:none; z-index:4; }
+  .stalled-zzz span{
+    position:absolute; left:0; bottom:0; font-family:'Baloo 2',sans-serif; font-weight:700;
+    color:var(--ink-soft); opacity:0; white-space:nowrap; animation: zzzDrift 3.2s ease-in infinite;
   }
+  .stalled-zzz span:nth-child(1){ font-size:8px; animation-delay:0s; }
+  .stalled-zzz span:nth-child(2){ font-size:10px; animation-delay:0.9s; }
+  .stalled-zzz span:nth-child(3){ font-size:12px; animation-delay:1.8s; }
   @keyframes bob{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(-4px);} }
-  @keyframes bobCentered{ 0%,100%{transform:translateX(-50%) translateY(0);} 50%{transform:translateX(-50%) translateY(-4px);} }
+  @keyframes zzzDrift{
+    0%{ opacity:0; transform:translate(-2px,4px) rotate(-4deg); }
+    18%{ opacity:0.7; }
+    70%{ opacity:0.5; }
+    100%{ opacity:0; transform:translate(10px,-26px) rotate(10deg); }
+  }
   @keyframes sparkle{ 0%,100%{opacity:0.4; transform:scale(0.9);} 50%{opacity:1; transform:scale(1.15);} }
   @keyframes sway{ 0%,100%{ transform: rotate(-2.5deg); } 50%{ transform: rotate(2.5deg); } }
   @keyframes floatCloud{ 0%{ transform: translateX(0); } 100%{ transform: translateX(-18px); } }
@@ -746,7 +772,10 @@
       <div class="avatar-btn" data-action="open-profile" title="Profile">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" fill="#fff"/><path d="M4 20C4 15 8 13 12 13C16 13 20 15 20 20" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
       </div>
-      <div class="level-chip" id="levelChip">Lv 1</div>
+      <div class="level-chip level-progress-btn" id="levelChip" data-action="open-level-progress" title="Level progress">
+        <div class="level-progress-fill" id="levelProgressFill"></div>
+        <span class="level-progress-text" id="levelProgressText">Lv 1</span>
+      </div>
     </div>
     <div class="topbar-center">
       <div class="brand">
@@ -1014,10 +1043,19 @@ Object.keys(TIER_DEFAULTS).forEach(tierKey=>{
     const category = i < shopCount ? 'shop' : i < shopCount+mapCount ? 'map' : 'both';
     const step = i*scale;
     const [petal, center] = hueForSpecies(tierKey, i, names.length);
+    // Step requirements are rounded to the nearest 100 so every seed's threshold is a round
+    // number ending in two zeroes (e.g. 1200, 1500, 2300), while `step` still spreads species
+    // within a tier so they don't all land on the exact same count (a few sharing a bucket after
+    // rounding is fine and expected). Harvest payout is then derived directly from the FINAL
+    // rounded threshold (not the raw pre-rounding value) so it scales in true, direct proportion
+    // to how many extra steps that specific seed actually needs -- a seed that takes longer to
+    // grow always pays out more, with no rounding-introduced mismatch between the two.
+    const rawThreshold = tier.thresholdBase + step*tier.thresholdStep;
+    const threshold = Math.max(100, Math.round(rawThreshold/100)*100);
+    const harvest = Math.max(1, Math.round(tier.harvestBase * (threshold/tier.thresholdBase)));
     SEED_TYPES[key] = {
       key, name, rarityLabel: tierKey.toUpperCase(), tierKey,
-      threshold: Math.round(tier.thresholdBase + step*tier.thresholdStep),
-      harvest: Math.round(tier.harvestBase + step*tier.harvestStep),
+      threshold, harvest,
       compost: Math.round(tier.compostBase + step*tier.compostStep),
       shape: tier.shape, petals: tier.shape==='bloom' ? tier.petals + (i%3) : tier.petals, petal, center,
       bg: tier.bg, tag: tier.tag, weight: tier.weight,
@@ -1181,10 +1219,103 @@ const WeatherProvider = {
   async getCurrentWeather(){ return WEATHER_TYPES[weatherIndex]; },
   async getUserLocation(){ return null; }
 };
+// Weather changes crossfade (two stacked weather-effect layers, opacity-swapped) rather than
+// snapping via a full re-render -- see crossfadeWeatherLayer() and the two #weatherLayerA/B nodes
+// rendered into roomPageHtml. The room-scene's own weather-* class (its base sky-gradient color)
+// is swapped via classList directly too, so the existing `transition: background` on .room-scene
+// (which a full innerHTML replace would otherwise defeat by recreating the element) actually runs.
 function cycleWeather(){
   weatherIndex = (weatherIndex + 1) % WEATHER_TYPES.length;
-  state.weather = WEATHER_TYPES[weatherIndex];
-  if(state.tab === 'garden' && !state.modal) render();
+  const newWeather = WEATHER_TYPES[weatherIndex];
+  state.weather = newWeather;
+  const scene = document.querySelector('.room-scene.windowsill');
+  if(state.tab === 'garden' && !state.modal && scene){
+    WEATHER_TYPES.forEach(w=> scene.classList.remove('weather-'+w));
+    scene.classList.add('weather-'+newWeather);
+    crossfadeWeatherLayer(newWeather);
+    const chip = document.querySelector('.weather-chip');
+    if(chip) chip.textContent = WEATHER_ICONS[newWeather];
+  }
+  // If the windowsill isn't currently mounted/visible, nothing on screen needs updating right now
+  // -- the next full render() will simply generate it fresh with the correct, current weather.
+}
+
+/* ===================== TIME OF DAY (real-clock windowsill ambience) ===================== */
+// 11 named phases spanning the real 24h clock, each with its own soft tint overlay. Ordered by
+// `start` (a 24h decimal hour) ascending; getTimeOfDayPhase() picks whichever phase's `start` is
+// the largest one at-or-before the current time, wrapping naturally back to 'midnight' after
+// 23.5 without needing any special-case wraparound math.
+const TIME_PHASES = [
+  { key:'midnight',  label:'Midnight',  icon:'🌑', start:0    },
+  { key:'dawn',       label:'Dawn',      icon:'🌌', start:4.5  },
+  { key:'sunrise',    label:'Sunrise',   icon:'🌅', start:6    },
+  { key:'morning',    label:'Morning',   icon:'🌤️', start:7.5  },
+  { key:'forenoon',   label:'Forenoon',  icon:'⛅', start:10   },
+  { key:'noon',       label:'Noon',      icon:'☀️', start:11.5 },
+  { key:'afternoon',  label:'Afternoon', icon:'🌇', start:13.5 },
+  { key:'dusk',       label:'Dusk',      icon:'🌆', start:17   },
+  { key:'twilight',   label:'Twilight',  icon:'🌃', start:18.5 },
+  { key:'evening',    label:'Evening',   icon:'🌙', start:19.5 },
+  { key:'night',      label:'Night',     icon:'✨', start:21.5 },
+  { key:'midnight',   label:'Midnight',  icon:'🌑', start:23.5 }
+];
+// Soft translucent tint per phase, layered as an overlay on top of the existing weather-driven
+// base gradient -- warms toward dawn/dusk, cools and darkens toward night, stays near-neutral
+// around midday. Deliberately a semi-transparent overlay (not a full gradient replacement) so it
+// composes cleanly with any weather underneath it instead of fighting for the same visual role.
+const TIME_TINTS = {
+  midnight:  'rgba(10,14,42,0.55)',
+  dawn:      'rgba(255,185,150,0.24)',
+  sunrise:   'rgba(255,205,140,0.22)',
+  morning:   'rgba(255,250,230,0.08)',
+  forenoon:  'rgba(255,255,255,0.03)',
+  noon:      'rgba(255,255,255,0)',
+  afternoon: 'rgba(255,232,185,0.08)',
+  dusk:      'rgba(255,145,105,0.24)',
+  twilight:  'rgba(150,105,180,0.28)',
+  evening:   'rgba(75,65,140,0.34)',
+  night:     'rgba(20,25,70,0.46)'
+};
+function getTimeOfDayPhase(d){
+  d = d || new Date();
+  const hour = d.getHours() + d.getMinutes()/60;
+  let phase = TIME_PHASES[0];
+  for(const p of TIME_PHASES){ if(hour >= p.start) phase = p; }
+  return phase;
+}
+// Runtime-only crossfade trackers (not part of state -- purely which of the two DOM layers is
+// currently "on top", reset to a fresh baseline every time renderGarden() regenerates the DOM --
+// see the reset in render()). Two-layer opacity crossfade (never a snap, never a re-injected
+// keyframe/filter recalculated every tick) is what keeps this smooth on mobile -- see the
+// technical caveats this spec called out about weather/time transition animation churn.
+let timeLayerState = { active:'a', phaseKey: null };
+let weatherLayerRuntimeState = { active:'a', weather: null };
+function windowsillTimeTick(){
+  const phase = getTimeOfDayPhase();
+  if(timeLayerState.phaseKey === phase.key) return;
+  const nextId = timeLayerState.active === 'a' ? 'timeLayerB' : 'timeLayerA';
+  const curId = timeLayerState.active === 'a' ? 'timeLayerA' : 'timeLayerB';
+  const nextEl = document.getElementById(nextId);
+  const curEl = document.getElementById(curId);
+  if(!nextEl || !curEl){ timeLayerState.phaseKey = phase.key; return; } // windowsill not currently mounted -- next render() will pick up the current phase fresh anyway
+  nextEl.style.background = TIME_TINTS[phase.key];
+  requestAnimationFrame(()=>{ nextEl.style.opacity = '1'; curEl.style.opacity = '0'; });
+  const chip = document.getElementById('timeChip');
+  if(chip) chip.textContent = `${phase.icon} ${phase.label}`;
+  timeLayerState.active = timeLayerState.active === 'a' ? 'b' : 'a';
+  timeLayerState.phaseKey = phase.key;
+}
+function crossfadeWeatherLayer(newWeather){
+  if(weatherLayerRuntimeState.weather === newWeather) return;
+  const nextId = weatherLayerRuntimeState.active === 'a' ? 'weatherLayerB' : 'weatherLayerA';
+  const curId = weatherLayerRuntimeState.active === 'a' ? 'weatherLayerA' : 'weatherLayerB';
+  const nextEl = document.getElementById(nextId);
+  const curEl = document.getElementById(curId);
+  if(!nextEl || !curEl){ weatherLayerRuntimeState.weather = newWeather; return; }
+  nextEl.innerHTML = weatherLayerSVG(newWeather);
+  requestAnimationFrame(()=>{ nextEl.style.opacity = '1'; curEl.style.opacity = '0'; });
+  weatherLayerRuntimeState.active = weatherLayerRuntimeState.active === 'a' ? 'b' : 'a';
+  weatherLayerRuntimeState.weather = newWeather;
 }
 
 /* ---- Room carousel: paging, swipe, pagination dots ---- */
@@ -1519,9 +1650,21 @@ function haversineMeters(lat1,lon1,lat2,lon2){
 }
 
 /* ===================== LEVEL / XP CURVE ===================== */
+// Every level's cumulative step requirement is rounded to the nearest 100 (round numbers ending
+// in two zeroes, per spec), then defensively clamped to stay strictly above the previous level's
+// requirement -- rounding two adjacent levels to the same hundred is only a theoretical edge case
+// at these curve parameters, but this guarantees the curve can never flatten or go backwards.
+// Memoized (recursion depth stays tiny either way, this just avoids recomputing on every lookup).
+const _levelStepsCache = {0:0, 1:0};
 function cumulativeStepsForLevel(level){
   if(level <= 1) return 0;
-  return Math.round(300 * Math.pow(level - 1, 1.7));
+  if(_levelStepsCache[level] !== undefined) return _levelStepsCache[level];
+  const raw = 300 * Math.pow(level - 1, 1.7);
+  let rounded = Math.max(100, Math.round(raw/100)*100);
+  const prev = cumulativeStepsForLevel(level-1);
+  if(rounded <= prev) rounded = prev + 100;
+  _levelStepsCache[level] = rounded;
+  return rounded;
 }
 function getLevelFromSteps(steps){
   let level = 1;
@@ -1620,7 +1763,9 @@ let state = {
   ambientTargetCount: null,
   mapPOIs: [],
   walkActive: false, // true while a walk session (wake lock + accelerometer step counting) is running
-  notifPermission: (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported'
+  notifPermission: (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported',
+  devMode: false // session-only -- never persisted; unlocked via the 4-digit code in Settings, and
+                  // always locks back down on reload or on an explicit progress reset
 };
 state.discovered['common'] = true;
 let lastRenderedTab = null;
@@ -1692,6 +1837,40 @@ function playSfx(type){
     gain.gain.exponentialRampToValueAtTime(0.0001, now+dur);
     osc.start(now); osc.stop(now+dur+0.02);
   }catch(e){ console.error('Flora sfx error:', e); }
+}
+// Synthesized ripping-paper sound for pack-opening -- a short filtered-noise burst (no external
+// audio file, no build step: a raw AudioBuffer filled with an amplitude-enveloped noise texture,
+// swept through a rising bandpass filter to give it a crackly "tearing" character) rather than a
+// plain tone. Requires no external asset and works purely off the existing Web Audio primitives.
+function playRipSound(){
+  if(!state.settings.sfx) return;
+  const ctx = ensureAudio(); if(!ctx || ctx.state !== 'running') return;
+  try{
+    const dur = 0.34;
+    const bufferSize = Math.floor(ctx.sampleRate * dur);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for(let i=0;i<bufferSize;i++){
+      const t = i / bufferSize;
+      // A jagged, front-loaded decay with a little random "crackle" variance in the envelope
+      // itself (not just the noise) is what reads as tearing paper rather than a smooth hiss.
+      const envelope = Math.pow(1-t, 1.6) * (0.55 + 0.45*Math.random());
+      data[i] = (Math.random()*2-1) * envelope;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.value = 0.7;
+    filter.frequency.setValueAtTime(1500, ctx.currentTime);
+    filter.frequency.exponentialRampToValueAtTime(4000, ctx.currentTime + dur*0.85);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.24, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+    src.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+    src.start(ctx.currentTime); src.stop(ctx.currentTime + dur + 0.05);
+  }catch(e){ console.error('Flora rip sfx error:', e); }
 }
 function toggleMusic(){ state.settings.music = !state.settings.music; if(state.settings.music) startMusic(); else stopMusic(); render(); }
 function toggleSfx(){ state.settings.sfx = !state.settings.sfx; render(); }
@@ -2294,6 +2473,118 @@ async function loadProgressState(){
     }
   }catch(e){ console.error('Flora progress load error:', e); }
   render();
+}
+
+/* ---- Full game-state persistence: pouch, room/pot contents & growth, Dex, discovered species, ----
+   ---- total steps, and settings all survive a reload now (previously session-only). Follows the
+   exact same debounced-save / defensive-sanitized-load pattern as the map-state persistence above. */
+let gameStateLoaded = false;
+let gameSaveTimer = null;
+const GAME_SAVE_DEBOUNCE_MS = 500;
+function gameStateSnapshot(){
+  return JSON.stringify({
+    pouch: state.pouch,
+    roomPots: state.roomPots,
+    dex: state.dex,
+    discovered: state.discovered,
+    totalSteps: state.totalSteps,
+    totalHarvested: state.totalHarvested,
+    settings: state.settings
+  });
+}
+function saveGameStateDebounced(){
+  if(!gameStateLoaded) return; // never overwrite a real save with the pre-load default state
+  if(gameSaveTimer) clearTimeout(gameSaveTimer);
+  gameSaveTimer = setTimeout(async ()=>{
+    gameSaveTimer = null;
+    try{
+      if(!window.storage) return;
+      await window.storage.set('flora_game_state', gameStateSnapshot(), false);
+    }catch(e){ console.error('Flora game state save error:', e); }
+  }, GAME_SAVE_DEBOUNCE_MS);
+}
+function flushGameStateNow(){
+  if(!gameStateLoaded) return;
+  if(gameSaveTimer){ clearTimeout(gameSaveTimer); gameSaveTimer = null; }
+  try{
+    if(!window.storage) return;
+    window.storage.set('flora_game_state', gameStateSnapshot(), false);
+  }catch(e){ console.error('Flora game state flush error:', e); }
+}
+// Every loaded pouch/pot entry is re-validated field-by-field before being trusted, exactly like
+// the map spawn sanitizer -- a corrupted value, an unknown/renamed SEED_TYPES key, or a structure
+// left over from an older cache shape is dropped/repaired rather than allowed to crash the app.
+function sanitizePouchItem(it){
+  if(!it || typeof it !== 'object') return null;
+  if(typeof it.type !== 'string' || !SEED_TYPES[it.type]) return null;
+  const uid = (typeof it.uid === 'number' || typeof it.uid === 'string') ? it.uid : (seedUid++);
+  return { uid, type: it.type };
+}
+function sanitizePotEntry(p){
+  if(!p || typeof p !== 'object') return null;
+  if(typeof p.type !== 'string' || !SEED_TYPES[p.type]) return null;
+  const type = SEED_TYPES[p.type];
+  const uid = (typeof p.uid === 'number' || typeof p.uid === 'string') ? p.uid : (seedUid++);
+  const progress = Number.isFinite(p.progress) ? Math.max(0, Math.min(type.threshold, p.progress)) : 0;
+  const out = { uid, type: p.type, progress };
+  if(type.requirement){
+    // Resume the music-growth clock fresh from "now" rather than trusting a stale/offline
+    // timestamp -- avoids a huge apparent elapsed-time jump instantly finishing the plant.
+    out.lastMusicTickAt = Date.now();
+    out.stalled = AudioManager.currentPlayingTrack !== type.requirement.songId;
+  }
+  return out;
+}
+async function loadGameStatePersistence(){
+  try{
+    if(window.storage){
+      const res = await window.storage.get('flora_game_state', false);
+      if(res && res.value){
+        const data = JSON.parse(res.value);
+        if(Array.isArray(data.pouch)) state.pouch = data.pouch.map(sanitizePouchItem).filter(Boolean);
+        if(data.roomPots && typeof data.roomPots === 'object'){
+          ROOMS.forEach(room=>{
+            const saved = data.roomPots[room.id];
+            if(Array.isArray(saved)){
+              const arr = new Array(room.capacity).fill(null);
+              for(let i=0;i<Math.min(room.capacity, saved.length);i++) arr[i] = sanitizePotEntry(saved[i]);
+              state.roomPots[room.id] = arr;
+            }
+          });
+        }
+        if(data.dex && typeof data.dex === 'object'){
+          const cleanDex = {};
+          Object.keys(data.dex).forEach(k=>{ if(SEED_TYPES[k] && Number.isFinite(data.dex[k])) cleanDex[k] = Math.max(0, Math.round(data.dex[k])); });
+          state.dex = cleanDex;
+        }
+        if(data.discovered && typeof data.discovered === 'object'){
+          const cleanDisc = {};
+          Object.keys(data.discovered).forEach(k=>{ if(SEED_TYPES[k] && data.discovered[k]) cleanDisc[k] = true; });
+          state.discovered = cleanDisc;
+        }
+        if(Number.isFinite(data.totalSteps) && data.totalSteps >= 0) state.totalSteps = data.totalSteps;
+        if(Number.isFinite(data.totalHarvested) && data.totalHarvested >= 0) state.totalHarvested = data.totalHarvested;
+        if(data.settings && typeof data.settings === 'object'){
+          state.settings.music = !!data.settings.music;
+          state.settings.sfx = data.settings.sfx !== false;
+        }
+      }
+    }
+  }catch(e){ console.error('Flora game state load error:', e); }
+  state.discovered['common'] = true; // the free starter seed is always already discovered, even after a corrupted/empty load
+  gameStateLoaded = true;
+  render();
+}
+// Wipes every persisted Flora key (progress, map, streak, and full game state) and reloads --
+// used only by the explicit, confirmed "Reset All Progress" button in Settings.
+async function wipeAllGameData(){
+  try{
+    if(window.storage){
+      const keys = ['flora_daily_streak','flora_map_state','flora_progress_state','flora_game_state'];
+      await Promise.all(keys.map(k=> window.storage.delete ? window.storage.delete(k, false).catch(()=>{}) : Promise.resolve()));
+    }
+  }catch(e){ console.error('Flora reset error:', e); }
+  location.reload();
 }
 
 // Interactive key-unlock experience: idle -> turning -> breaking -> falling -> unlocked. Each
@@ -2911,8 +3202,17 @@ function syncSpawnMarkers(){
 function render(){
   try{
     document.getElementById('coinCount').textContent = fmt(state.coins);
-    const lvlEl = document.getElementById('levelChip');
-    if(lvlEl) lvlEl.textContent = `Lv ${state.level}`;
+    // Level chip is now a sideways progress bar (fills as totalSteps approaches the next level's
+    // requirement) rather than plain "Lv N" text -- the fill width/label are patched directly here
+    // on every render so it always reflects state.totalSteps without needing its own re-render path.
+    const curLevelBase = cumulativeStepsForLevel(state.level);
+    const nextLevelReq = cumulativeStepsForLevel(state.level+1);
+    const levelSpan = Math.max(1, nextLevelReq - curLevelBase);
+    const levelPct = Math.max(0, Math.min(100, ((state.totalSteps - curLevelBase) / levelSpan) * 100));
+    const lvlFillEl = document.getElementById('levelProgressFill');
+    if(lvlFillEl) lvlFillEl.style.width = levelPct.toFixed(1) + '%';
+    const lvlTxtEl = document.getElementById('levelProgressText');
+    if(lvlTxtEl) lvlTxtEl.textContent = `Lv ${state.level}`;
     document.querySelectorAll('.nav-btn').forEach(btn=>{
       btn.classList.toggle('active', btn.dataset.tab === state.tab);
     });
@@ -2936,7 +3236,15 @@ function render(){
     }
 
     const stayingOnMap = state.tab === 'map' && lastRenderedTab === 'map' && leafletMapInstance;
-    if(state.tab === 'garden') content.innerHTML = renderGarden();
+    if(state.tab === 'garden'){
+      content.innerHTML = renderGarden();
+      // A full innerHTML replace just recreated the windowsill's time/weather crossfade layers
+      // fresh at their baseline (layer A = current phase/weather, opaque; layer B = blank/hidden)
+      // -- reset the runtime trackers to match so the next periodic tick computes a real diff
+      // instead of possibly seeing a stale phase/weather and skipping a crossfade it should run.
+      timeLayerState = { active:'a', phaseKey: getTimeOfDayPhase().key };
+      weatherLayerRuntimeState = { active:'a', weather: state.weather };
+    }
     else if(state.tab === 'map'){
       if(!stayingOnMap){
         content.innerHTML = renderMap();
@@ -2966,6 +3274,7 @@ function render(){
 
     lastRenderedTab = state.tab;
     renderModal();
+    saveGameStateDebounced(); // catch-all: covers every action that calls render() but isn't already explicitly saved above
   }catch(err){
     console.error('Flora render error:', err);
   }
@@ -3071,7 +3380,7 @@ function potVisualInner(potState){
   // still reads clearly in front, since it extends outside that ellipse's silhouette.
   return `
     ${ready ? `<div class="ready-badge">✨ Ready!</div>` : ''}
-    ${stalled ? `<div class="stalled-badge" title="Needs its required song playing">!</div>` : ''}
+    ${stalled ? `<div class="stalled-zzz" title="Resting — needs its required song playing"><span>z</span><span>z</span><span>Z</span></div>` : ''}
     <svg width="101" height="65" viewBox="0 0 88 58" style="position:absolute; left:50%; bottom:0; transform:translateX(-50%); z-index:1;">
       <ellipse cx="44" cy="14" rx="34" ry="7" fill="#3a2a1c" opacity="0.18"/>
       <path d="M10 12 L18 54 Q44 60 70 54 L78 12 Z" fill="var(--terracotta)" stroke="var(--terracotta-dark)" stroke-width="2" stroke-linejoin="round"/>
@@ -3112,9 +3421,10 @@ function animatePotGrowth(index, fromProgress, toProgress){
 }
 
 /* ===================== WEATHER RENDERING ===================== */
-function skyDecoSVG(weather){
-  const showSun = weather === 'sunny';
-  const cloudOpacity = weather === 'cloudy' ? 0.95 : weather === 'sunny' ? 0.85 : 0.55;
+function skyDecoSVG(weather, phaseKey){
+  const isDark = phaseKey === 'night' || phaseKey === 'midnight' || phaseKey === 'evening';
+  const showSun = weather === 'sunny' && !isDark;
+  const cloudOpacity = (weather === 'cloudy' ? 0.95 : weather === 'sunny' ? 0.85 : 0.55) * (isDark ? 0.6 : 1);
   return `<svg class="sky-deco" viewBox="0 0 400 260" preserveAspectRatio="none" width="100%" height="260">
     ${showSun ? `<circle cx="335" cy="50" r="26" fill="#F7E2A8" opacity="0.9"/>` : ''}
     <g style="animation: floatCloud 6s ease-in-out infinite alternate;"><ellipse cx="72" cy="58" rx="32" ry="14" fill="#ffffff" opacity="${cloudOpacity}"/><ellipse cx="102" cy="50" rx="22" ry="12" fill="#ffffff" opacity="${cloudOpacity}"/></g>
@@ -3234,11 +3544,25 @@ function roomPageHtml(room, index){
   const positions = computePotLayout(room);
   const potsHtml = pots.map((p,i)=> potSVG(i, p, positions[i], room.potScale)).join('');
   const isWindowsill = room.id === 'windowsill';
+  const phase = isWindowsill ? getTimeOfDayPhase() : null;
+  // Windowsill-only living ambience: a base weather-driven CSS gradient (unchanged, still a plain
+  // class swap), a soft time-of-day tint layer on top of it, and the existing weather-effect SVG
+  // (rain/snow/clouds) on top of that -- each of the latter two rendered as TWO stacked layers
+  // (A/B) so windowsillTimeTick()/crossfadeWeatherLayer() can opacity-crossfade between them
+  // smoothly whenever the real clock or the weather cycle changes, instead of ever snapping.
+  const windowsillAmbienceHtml = isWindowsill ? `
+        <div class="time-tint-layer" id="timeLayerA" style="background:${TIME_TINTS[phase.key]}; opacity:1;"></div>
+        <div class="time-tint-layer" id="timeLayerB"></div>
+        <div class="weather-crossfade-layer" id="weatherLayerA" style="opacity:1;">${weatherLayerSVG(state.weather)}</div>
+        <div class="weather-crossfade-layer" id="weatherLayerB"></div>
+        <div class="time-chip" id="timeChip">${phase.icon} ${phase.label}</div>
+  ` : '';
   return `
     <div class="room-page">
       <div class="room-scene ${isWindowsill ? 'windowsill weather-'+state.weather : 'theme-'+room.theme} ${unlocked?'':'room-locked'}">
         ${isWindowsill ? `<div class="weather-chip">${WEATHER_ICONS[state.weather]}</div>` : ''}
-        ${isWindowsill ? skyDecoSVG(state.weather) + weatherLayerSVG(state.weather) : ''}
+        ${isWindowsill ? skyDecoSVG(state.weather, phase.key) : ''}
+        ${windowsillAmbienceHtml}
         ${isWindowsill ? '<div class="lace-trim"></div><div class="window-mullion-v"></div><div class="window-mullion-h"></div>' : ''}
         ${themeDecorHtml(room)}
         <div class="pots-row">${potsHtml}</div>
@@ -3270,7 +3594,7 @@ function renderGarden(){
       <button class="room-nav-arrow left" data-action="room-prev" ${atFirst?'disabled':''}>‹</button>
       <div class="room-viewport" id="roomViewport">
         <div class="room-track" id="roomTrack" style="transform:translateX(-${state.currentRoom*100}%);">${roomPagesHtml}</div>
-        <div class="radio-widget" id="radioWidget" data-action="toggle-radio" title="Radio">
+        <div class="radio-widget ${state.radio.isPlaying ? 'playing' : ''}" id="radioWidget" data-action="toggle-radio" title="Radio">
           <div class="radio-notes" id="radioNotes"></div>
           <svg width="30" height="30" viewBox="0 0 40 40">
             <rect x="7" y="14" width="26" height="19" rx="4" fill="#E8956B" stroke="#A8603C" stroke-width="1.6"/>
@@ -3282,17 +3606,23 @@ function renderGarden(){
             <rect x="22" y="24" width="7" height="2.4" rx="1.2" fill="#A8603C" opacity="0.6"/>
             <circle class="radio-dial" cx="29" cy="30" r="2" fill="#F5C24B" stroke="#A8603C" stroke-width="1"/>
           </svg>
-          <div class="radio-label" id="radioLabel">Tap to play</div>
+          <!-- BUG FIX: this used to always hardcode "Tap to play" regardless of state.radio, so any
+               full re-render (harvesting, planting, buying a pack, etc.) after tapping the radio
+               wiped out the direct DOM label update that cycleRadioSong() makes, snapping the label
+               back to the static placeholder even though a song was still actively playing. Now
+               sourced from state.radio itself, so every render (fast-path or full) shows the truth. -->
+          <div class="radio-label" id="radioLabel">${state.radio.isPlaying ? RADIO_SONGS[state.radio.songIndex].name : 'Tap to play'}</div>
         </div>
       </div>
       <button class="room-nav-arrow right" data-action="room-next" ${atLast?'disabled':''}>›</button>
     </div>
+    ${state.devMode ? `
     <div class="fab-wrap">
       <button class="pill-btn fab" data-action="simulate">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M8 20L10 4M16 20L14 4" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
         Simulate Steps (+500)
       </button>
-    </div>
+    </div>` : ''}
     <div class="card shop-card">
       <div class="section-heading"><h3>🛍️ Seed Shop</h3><button class="pill-btn gold" data-action="open-shop">Browse Packs</button></div>
       <div class="screen-sub" style="margin:0;">4 pack tiers, from cheap Sprout Packs to guaranteed-Epic Mega Packs.</div>
@@ -3710,13 +4040,44 @@ function renderModal(){
           <div class="label">🔔 Sound Effects</div>
           <button class="pill-btn ${state.settings.sfx?'primary':'soft'}" data-action="toggle-sfx">${state.settings.sfx?'On':'Off'}</button>
         </div>
+        <div class="stat-row-item" style="margin-top:14px;">
+          <div class="label">🛠️ Developer Tools</div>
+          <button class="pill-btn soft" data-action="toggle-devmode">${state.devMode ? 'Exit Dev Mode' : 'Enter Code'}</button>
+        </div>
+        ${state.devMode ? `<div class="screen-sub" style="margin:2px 0 0;">Developer mode is active — a "Simulate Steps" button is now showing on the Garden tab.</div>` : ''}
+        <div class="stat-row-item" style="margin-top:14px;">
+          <div class="label">⚠️ Reset All Progress</div>
+          <button class="pill-btn" style="background:#e0473f; color:#fff; box-shadow:0 2px 0 #a8342d;" data-action="reset-progress">Reset (Test)</button>
+        </div>
       </div>
     </div>`;
   }
 
+  if(state.modal === 'levelProgress'){
+    const curBase = cumulativeStepsForLevel(state.level);
+    const nextReq = cumulativeStepsForLevel(state.level+1);
+    const intoLevel = Math.max(0, state.totalSteps - curBase);
+    const span = Math.max(1, nextReq - curBase);
+    const pct = Math.max(0, Math.min(100, (intoLevel/span)*100));
+    root.innerHTML = `
+    <div class="modal-backdrop" id="backdrop">
+      <div class="modal-sheet" style="position:relative;">
+        <div class="close-x" data-action="close-modal">✕</div>
+        <div class="modal-handle"></div>
+        <div class="modal-title">🌟 Level ${state.level} Progress</div>
+        <div class="modal-sub">${fmt(intoLevel)} / ${fmt(span)} steps toward Level ${state.level+1}</div>
+        <div style="background:var(--line); border-radius:999px; height:14px; overflow:hidden; margin:12px 0;">
+          <div style="height:100%; width:${pct.toFixed(1)}%; background:var(--gold); border-radius:999px; transition:width 0.4s ease;"></div>
+        </div>
+        <div class="stat-row-item"><div class="label">👣 Total Steps Walked</div><div class="value">${fmt(state.totalSteps)}</div></div>
+        <div class="stat-row-item"><div class="label">🎯 Steps Needed for Lv ${state.level+1}</div><div class="value">${fmt(nextReq)}</div></div>
+      </div>
+    </div>`;
+    return;
+  }
+
   if(state.modal === 'profile'){
     const discovered = DEX_ORDER.filter(k=> state.discovered[k]).length;
-    const nextLevelSteps = stepsForNextLevel(state.level);
     root.innerHTML = `
     <div class="modal-backdrop" id="backdrop">
       <div class="modal-sheet" style="position:relative;">
@@ -3726,7 +4087,7 @@ function renderModal(){
         <div class="modal-title" style="text-align:center;">Gardener Profile</div>
         <div class="modal-sub" style="text-align:center;">Your journey with Flora so far.</div>
         <div class="stat-list">
-          <div class="stat-row-item"><div class="label">🌟 Level</div><div class="value">${state.level} (${fmt(state.totalSteps)} / ${fmt(nextLevelSteps)} steps)</div></div>
+          <div class="stat-row-item"><div class="label">🌟 Level</div><div class="value">${state.level}</div></div>
           <div class="stat-row-item"><div class="label">👣 Total Steps Walked</div><div class="value">${fmt(state.totalSteps)}</div></div>
           <div class="stat-row-item"><div class="label">🌼 Plants Harvested</div><div class="value">${fmt(state.totalHarvested)}</div></div>
           <div class="stat-row-item"><div class="label">🪙 Total Coins Earned</div><div class="value">${fmt(state.totalCoinsEarned)}</div></div>
@@ -3764,6 +4125,11 @@ function setupTearInteraction(){
     dragging = true; done = false;
     startX = (e.touches ? e.touches[0].clientX : e.clientX);
     if(hint) hint.style.opacity = '0';
+    // Audio synthesis/playback must be triggered directly inside a user-gesture handler (mobile
+    // browsers block programmatic AudioContext playback otherwise) -- warm/resume the context
+    // right on this pointerdown so it's already 'running' by the time completeTear() plays the
+    // rip sound moments later, mid-gesture.
+    ensureAudio();
   }
   function onMove(e){
     if(!dragging || done) return;
@@ -3794,7 +4160,7 @@ function setupTearInteraction(){
 function completeTear(leftHalf, rightHalf){
   if(leftHalf) leftHalf.style.transform = 'translate(-70px, 10px) rotate(-28deg)';
   if(rightHalf) rightHalf.style.transform = 'translate(70px, -12px) rotate(26deg)';
-  playSfx('pack');
+  playRipSound(); // satisfying ripping-paper burst, replacing the plain tone for this specific moment
   if(tearCleanup){ tearCleanup(); tearCleanup = null; }
   setTimeout(()=>{
     state.modal = 'burst';
@@ -3850,6 +4216,10 @@ function addSteps(n){
   } else {
     render();
   }
+  // Steps change totalSteps and pot progress on every call, whichever render path was taken above
+  // -- save explicitly here rather than relying only on render()'s save, since the "staying on
+  // garden" animate-in-place path above deliberately skips calling render() at all.
+  saveGameStateDebounced();
   return { growthUpdates: allReadyEvents, leveled };
 }
 
@@ -3885,6 +4255,7 @@ function musicGrowthTick(){
     });
   });
   if(visualsChanged && state.tab === 'garden' && !state.modal) render();
+  if(visualsChanged) saveGameStateDebounced(); // progress/stalled state changed even if not currently rendered
 }
 function simulateSteps(){
   const { growthUpdates, leveled } = addSteps(500);
@@ -4116,6 +4487,20 @@ function handleClick(e){
       if(action === 'start-key-unlock'){ startKeyUnlock(actionEl.dataset.roomId); return; }
       if(action === 'locked-room-tap'){ toast(`🔒 ${ROOMS[state.currentRoom].name} unlocks at Level ${ROOMS[state.currentRoom].levelReq}`); return; }
       if(action === 'toggle-radio'){ cycleRadioSong(); return; }
+      if(action === 'open-level-progress'){ state.modal = 'levelProgress'; render(); return; }
+      if(action === 'toggle-devmode'){
+        if(state.devMode){ state.devMode = false; toast('🔒 Developer mode locked.'); render(); return; }
+        const code = prompt('Enter developer code:');
+        if(code === '0001'){ state.devMode = true; toast('🛠️ Developer mode unlocked!'); }
+        else if(code !== null){ toast('❌ Incorrect code.'); }
+        render();
+        return;
+      }
+      if(action === 'reset-progress'){
+        const sure = confirm('This will permanently erase ALL of your Flora progress -- coins, seeds, plants, level, and Dex. This cannot be undone. Reset everything and restart?');
+        if(sure) wipeAllGameData();
+        return;
+      }
     }
 
     const backdrop = el.closest('.modal-backdrop');
@@ -4155,8 +4540,10 @@ render();
 initStreak();
 loadMapPersistence();
 loadProgressState();
+loadGameStatePersistence(); // pouch, room/pot contents & growth, Dex, discovered species, totalSteps, settings
 setInterval(cycleWeather, 14000);
 setInterval(musicGrowthTick, 2500);
+setInterval(windowsillTimeTick, 60000); // real-clock phase check; only visually crossfades when the phase actually changes
 mapWorldTimer = setInterval(mapWorldTick, MAP_TICK_MS);
 // Reconcile against Date.now() whenever the app regains focus/visibility — handles the device
 // sleeping, the tab being backgrounded, or the clock otherwise drifting while we were away.
@@ -4165,17 +4552,17 @@ window.addEventListener('visibilitychange', ()=>{
   // independently (see render()) is auto-released by the browser whenever the page goes hidden,
   // same as the walk-session one always was — so reacquiring it here needs the same "or the map
   // tab is open" condition as everywhere else this lock is requested, not just state.walkActive.
-  if(document.visibilityState === 'visible'){ mapWorldTick(); ensureLocationTrackingActive(); if((state.walkActive || state.tab === 'map') && !wakeLockSentinel) requestWakeLock(); }
-  else { flushMapStateNow(); } // going hidden (tab switch, app backgrounded, about to close) — commit the latest layout now
+  if(document.visibilityState === 'visible'){ mapWorldTick(); ensureLocationTrackingActive(); windowsillTimeTick(); if((state.walkActive || state.tab === 'map') && !wakeLockSentinel) requestWakeLock(); }
+  else { flushMapStateNow(); flushGameStateNow(); } // going hidden (tab switch, app backgrounded, about to close) — commit the latest state now
 });
-window.addEventListener('focus', ()=>{ mapWorldTick(); ensureLocationTrackingActive(); });
+window.addEventListener('focus', ()=>{ mapWorldTick(); ensureLocationTrackingActive(); windowsillTimeTick(); });
 window.addEventListener('resize', ()=>{ if(leafletMapInstance) updateRadarArrows(); });
 // pagehide/beforeunload are the last reliable moments before a reload or tab close — force-flush
-// any still-debounced map-state write here too, belt-and-suspenders alongside the visibilitychange
-// flush above, so a fast reload can never land inside the old 500ms debounce window and revert to
-// a stale/empty layout that then looks like it "randomly regenerated".
-window.addEventListener('pagehide', flushMapStateNow);
-window.addEventListener('beforeunload', flushMapStateNow);
+// any still-debounced map-state AND game-state writes here too, belt-and-suspenders alongside the
+// visibilitychange flush above, so a fast reload can never land inside the old 500ms debounce
+// window and revert to a stale/empty layout/progress that then looks like it "randomly reset".
+window.addEventListener('pagehide', ()=>{ flushMapStateNow(); flushGameStateNow(); });
+window.addEventListener('beforeunload', ()=>{ flushMapStateNow(); flushGameStateNow(); });
 
 </script>
 </body>
