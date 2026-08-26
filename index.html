@@ -1577,6 +1577,24 @@ const POI_JITTER_MAX_M = 45;
 const SAFETY_EXCLUSION_RADIUS_M = 60;
 const SAFE_SPAWN_MAX_ATTEMPTS = 10;
 
+// Pedestrian-accessible spawn placement: real sidewalks/footways/paths/pedestrian streets/plazas/
+// park paths, fetched from OpenStreetMap the same way POIs and safety zones already are (see
+// fetchPedestrianWays). This is the PREFERRED spawn source — see pickSafeSpawnPoint() — so seeds
+// land on an actual walkable route rather than a fully random point that might fall in a bush, a
+// pond, or otherwise off-trail.
+const PEDESTRIAN_POINT_JITTER_M = 6;      // small jitter off an exact path node so seeds don't sit in a perfect line along it
+const PEDESTRIAN_WAY_SAMPLE_STRIDE = 3;   // sample every 3rd node along a fetched way -- enough density without an excessive point count
+const PEDESTRIAN_WAY_MAX_POINTS_PER_WAY = 14;
+const PEDESTRIAN_SAME_WAY_BIAS = 0.5;     // chance a pick favors the same real path as the last pick in this batch -- a light "hotspot" clustering feel
+
+// Restricted-way sampling for the safety-zone list (railways, highways/freeways, military,
+// airports, construction, explicitly private/no-foot-access ways): unlike the point-based
+// school/hospital/residential entries above, these come from OpenStreetMap as LINES, so several
+// points are sampled along each one's full length rather than treating it as a single center —
+// otherwise a long highway or railway would only be "guarded" near one arbitrary point on it.
+const RESTRICTED_WAY_SAMPLE_STRIDE = 4;
+const RESTRICTED_WAY_MAX_POINTS_PER_WAY = 10;
+
 function randBetween(min, max){ return min + Math.random()*(max-min); }
 
 // BUG FIX (the "spawns 15,000m away" report): cos(latitude) was used unclamped as a divisor when
@@ -1697,18 +1715,30 @@ async function loadNearbyPOIs(center){
   const osm = await fetchOSMPOIs(center);
   return osm && osm.length ? osm.slice(0, 40) : [];
 }
-// Strict safety exclusion zones: schools, hospitals, and similar sensitive locations, plus a
-// best-effort residential-building buffer, fetched once per map session. Nothing here is ever
-// shown to the player or used for spawn *placement* — it is purely an exclusion list checked by
-// isSafeSpawnPoint() before any seed is allowed to appear.
+// Strict safety exclusion zones: schools, hospitals, and similar sensitive locations, a
+// best-effort residential-building buffer, plus (new) military/airport/railway/highway/
+// construction/explicitly-private-or-no-foot-access areas -- fetched once per map session.
+// Nothing here is ever shown to the player or used for spawn *placement* — it is purely an
+// exclusion list checked by isSafeSpawnPoint() before any seed is allowed to appear. Point
+// features (schools, hospitals, residential buildings) contribute a single {lat,lon}; LINE
+// features (railways, highways, restricted ways) contribute several points sampled along their
+// full length (via Overpass's `out geom`), so a long road or rail line is guarded along its whole
+// run rather than just near one arbitrary point on it.
 async function fetchSafetyZones(center){
   const cached = getOverpassCache(center);
   if(cached && cached.zones) return cached.zones;
-  const query = `[out:json][timeout:12];(`
+  const query = `[out:json][timeout:15];(`
     + `node["amenity"~"^(school|hospital|kindergarten|clinic|college|university)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
     + `way["amenity"~"^(school|hospital|kindergarten|clinic|college|university)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
     + `node["building"~"^(house|residential|apartments|detached|semidetached_house|dormitory)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
-    + `);out center 200;`;
+    + `way["landuse"~"^(military|construction)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
+    + `way["military"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
+    + `way["aeroway"~"^(aerodrome|runway|taxiway|apron)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
+    + `way["railway"~"^(rail|light_rail|subway|narrow_gauge|monorail)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
+    + `way["highway"~"^(motorway|trunk|primary|motorway_link|trunk_link)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
+    + `way["access"~"^(private|no)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
+    + `way["foot"="no"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
+    + `);out geom 300;`;
   const url = 'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query);
   const ctrl = new AbortController();
   const timer = setTimeout(()=>ctrl.abort(), 7000);
@@ -1717,12 +1747,24 @@ async function fetchSafetyZones(center){
     clearTimeout(timer);
     if(!res.ok) throw new Error('Overpass HTTP '+res.status);
     const data = await res.json();
-    const zones = (data.elements || []).map(el=>{
+    const zones = [];
+    (data.elements || []).forEach(el=>{
+      if(el.type === 'way' && Array.isArray(el.geometry) && el.geometry.length){
+        // Line feature (railway, highway, restricted way, etc.) -- sample several points along
+        // its full geometry rather than just its centroid, so the whole run is guarded.
+        const geom = el.geometry.filter(g=> g && g.lat != null && g.lon != null);
+        let taken = 0;
+        for(let i=0; i<geom.length && taken<RESTRICTED_WAY_MAX_POINTS_PER_WAY; i+=RESTRICTED_WAY_SAMPLE_STRIDE){
+          zones.push({ lat: geom[i].lat, lon: geom[i].lon });
+          taken++;
+        }
+        return;
+      }
       const lat = el.lat ?? (el.center && el.center.lat);
       const lon = el.lon ?? (el.center && el.center.lon);
-      if(lat == null || lon == null) return null;
-      return { lat, lon };
-    }).filter(Boolean);
+      if(lat == null || lon == null) return;
+      zones.push({ lat, lon });
+    });
     setOverpassCache(center, { zones });
     return zones;
   }catch(e){
@@ -1733,17 +1775,83 @@ async function fetchSafetyZones(center){
     return [];
   }
 }
+// Real pedestrian-accessible infrastructure near the player: sidewalks, footways, paths,
+// pedestrian streets/steps, park paths, and plazas/squares -- fetched the same way POIs and
+// safety zones already are. This is the PREFERRED source of spawn candidates (see
+// pickSafeSpawnPoint()): sampling points along genuinely walkable OSM geometry, rather than a
+// fully random coordinate, is the core fix for seeds landing in bushes, off-trail, or somewhere
+// awkward to reach. Ways explicitly marked access=private/no or foot=no are discarded even if
+// they otherwise match one of the pedestrian highway types.
+async function fetchPedestrianWays(center){
+  const cached = getOverpassCache(center);
+  if(cached && cached.ways) return cached.ways;
+  const query = `[out:json][timeout:15];(`
+    + `way["highway"~"^(footway|path|pedestrian|steps|living_street|track)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
+    + `way["highway"]["sidewalk"~"^(both|left|right|yes)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
+    + `way["place"~"^(square|plaza)$"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
+    + `way["leisure"="park"]["highway"](around:${POI_FETCH_RADIUS_M},${center.lat},${center.lon});`
+    + `);out geom ${PEDESTRIAN_WAY_MAX_POINTS_PER_WAY*50};`;
+  const url = 'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query);
+  const ctrl = new AbortController();
+  const timer = setTimeout(()=>ctrl.abort(), 7000);
+  try{
+    const res = await fetch(url, {signal: ctrl.signal});
+    clearTimeout(timer);
+    if(!res.ok) throw new Error('Overpass HTTP '+res.status);
+    const data = await res.json();
+    const points = [];
+    (data.elements || []).forEach(el=>{
+      if(el.type !== 'way' || !Array.isArray(el.geometry) || !el.geometry.length) return;
+      const tags = el.tags || {};
+      // Explicit access restrictions always win, even on an otherwise pedestrian-tagged way.
+      if(tags.access === 'private' || tags.access === 'no') return;
+      if(tags.foot === 'no') return;
+      const geom = el.geometry.filter(g=> g && g.lat != null && g.lon != null);
+      let taken = 0;
+      for(let i=0; i<geom.length && taken<PEDESTRIAN_WAY_MAX_POINTS_PER_WAY; i+=PEDESTRIAN_WAY_SAMPLE_STRIDE){
+        points.push({ lat: geom[i].lat, lon: geom[i].lon, wayId: el.id });
+        taken++;
+      }
+    });
+    setOverpassCache(center, { ways: points });
+    return points;
+  }catch(e){
+    clearTimeout(timer);
+    console.error('Flora pedestrian-way fetch failed, spawn placement will fall back to the POI/organic path:', e);
+    return [];
+  }
+}
 function isSafeSpawnPoint(pt){
   for(let i=0;i<safetyZones.length;i++){
     if(haversineMeters(pt.lat, pt.lon, safetyZones[i].lat, safetyZones[i].lon) < SAFETY_EXCLUSION_RADIUS_M) return false;
   }
   return true;
 }
-// Picks a spawn location within [minM,maxM] of the player: sometimes biased toward a real nearby
-// POI (small jitter around it, never snapped exactly onto it), otherwise fully organic — then
-// verified against both the distance clamp and the safety exclusion zones, retrying if either
-// check fails before falling back to a guaranteed-safe point near the player.
+// Picks a spawn location within [minM,maxM] of the player. Preference order:
+//   1. A real pedestrian-accessible point (sidewalk/footway/path/pedestrian street/park path/
+//      plaza), lightly biased toward clustering along the same route as the previous pick in this
+//      batch -- see PEDESTRIAN_SAME_WAY_BIAS.
+//   2. A POI-anchored or fully organic point (the previous behavior), still fully verified.
+// Every candidate, from either source, is checked against the safety exclusion zones before ever
+// being accepted. If NEITHER source can produce a verified point within the attempt budget, this
+// returns null rather than ever falling back to an unverified random coordinate -- per spec, it is
+// better to spawn nothing this cycle than to guess (see pickGuardedSafeSpawnPoint/spawnAmbientSeed/
+// spawnSpecialSeed, which all treat null as "skip this spawn, try again next tick").
 function pickSafeSpawnPoint(center, minM, maxM){
+  const wayCandidates = pedestrianWayPoints.filter(p=> haversineMeters(center.lat, center.lon, p.lat, p.lon) <= maxM);
+  if(wayCandidates.length){
+    let pool = wayCandidates;
+    if(lastPickedWayId != null && Math.random() < PEDESTRIAN_SAME_WAY_BIAS){
+      const sameWay = wayCandidates.filter(p=> p.wayId === lastPickedWayId);
+      if(sameWay.length) pool = sameWay; // light clustering: several seeds along/around one short accessible route
+    }
+    for(let attempt=0; attempt<SAFE_SPAWN_MAX_ATTEMPTS; attempt++){
+      const base = pool[Math.floor(Math.random()*pool.length)];
+      const pt = clampedPointNear(base, 0, PEDESTRIAN_POINT_JITTER_M);
+      if(haversineMeters(center.lat, center.lon, pt.lat, pt.lon) > maxM) continue;
+      if(isSafeSpawnPoint(pt)){ lastPickedWayId = base.wayId; return pt; }
+    }
+  }
   const candidatePOIs = state.mapPOIs.filter(p=> haversineMeters(center.lat, center.lon, p.lat, p.lon) <= maxM);
   for(let attempt=0; attempt<SAFE_SPAWN_MAX_ATTEMPTS; attempt++){
     let pt;
@@ -1757,15 +1865,13 @@ function pickSafeSpawnPoint(center, minM, maxM){
     }
     if(isSafeSpawnPoint(pt)) return pt;
   }
-  // Guaranteed-safe fallback: walk inward from a random safe-ish point near the player. If even
-  // this collides with a safety zone (extremely dense sensitive area), it's still returned —
-  // an unlucky-but-rare spawn beats silently breaking the game for that player.
-  return clampedPointNear(center, minM, Math.max(minM, Math.min(maxM, 80)));
+  return null; // no verified pedestrian-accessible OR safety-verified point found -- caller must skip this spawn, never guess
 }
 // Fix: the map now dynamically keeps its Overpass data current as the player walks, instead of
-// only fetching once when the map tab first opens. Re-queries POIs + safety zones once the
-// player has moved more than POI_REFETCH_THRESHOLD_M from where they were last fetched, and
-// rebuilds the decorative POI markers to match. Uses the same Leaflet-race guard as map init.
+// only fetching once when the map tab first opens. Re-queries POIs + safety zones + pedestrian
+// ways once the player has moved more than POI_REFETCH_THRESHOLD_M from where they were last
+// fetched, and rebuilds the decorative POI markers to match. Uses the same Leaflet-race guard as
+// map init.
 async function maybeRefreshPOIs(center){
   if(!leafletMapInstance || typeof L === 'undefined') return;
   if(poiRefreshInFlight) return;
@@ -1773,10 +1879,11 @@ async function maybeRefreshPOIs(center){
   poiRefreshInFlight = true;
   const myGeneration = mapGeneration;
   try{
-    const [pois, zones] = await Promise.all([ loadNearbyPOIs(center), fetchSafetyZones(center) ]);
+    const [pois, zones, ways] = await Promise.all([ loadNearbyPOIs(center), fetchSafetyZones(center), fetchPedestrianWays(center) ]);
     if(myGeneration !== mapGeneration || !leafletMapInstance) return; // tab closed / map torn down mid-fetch
     state.mapPOIs = pois;
     safetyZones = zones;
+    pedestrianWayPoints = ways;
     lastPOIFetchCenter = center;
     poiMarkers.forEach(m=>{ try{ m.remove(); }catch(e){ console.error('Flora POI marker cleanup error:', e); } });
     poiMarkers = state.mapPOIs.map(poi=>{
@@ -2064,11 +2171,12 @@ function stalledReasonText(type){
   if(req.label) return `Needs ${req.label} to grow!`; // generic fallback for any future requirement that supplies its own description
   return `😴 This plant is waiting for the right conditions to grow!`;
 }
-// The single, explicit source of truth for "is this pot currently allowed to grow?" -- used by
-// addSteps() (which must give a requirement-locked pot exactly 0 progress while its condition
-// isn't met), musicGrowthTick() (which drives progress AND the .stalled flag for song-gated
-// pots), and plantSeed() (which needs the correct initial .stalled state the instant a
-// requirement-gated seed goes in the soil). A pot with no `type.requirement` at all is always met.
+// The single, explicit source of truth for "is this pot currently allowed to receive walking-step
+// progress right now?" -- used by addSteps() (the ONLY place that grows a plant: a requirement
+// gates whether a given batch of walking steps reaches this pot, it never generates progress on
+// its own), reconcileRequirementStates() (keeps .stalled current off radio/planting events), and
+// plantSeed() (needs the correct initial .stalled state the instant a requirement-gated seed goes
+// in the soil). A pot with no `type.requirement` at all is always met.
 function isRequirementMet(pot){
   if(!pot) return true;
   const type = SEED_TYPES[pot.type];
@@ -2126,16 +2234,17 @@ function cycleRadioSong(){
   const stopBtn = document.getElementById('radioStopBtn');
   if(stopBtn) stopBtn.style.display = 'inline-block'; // something is playing again -- make sure Stop is visible
   toast(`📻 Now playing: ${song.name} (${song.genre})`);
-  // The track just changed -- immediately re-check every music-requirement plant rather than
-  // waiting for the next periodic tick, so a plant that no longer matches stalls right away (and
-  // one that now matches starts growing right away) instead of lagging behind the song change.
-  musicGrowthTick();
+  // The track just changed -- immediately re-sync every music-requirement plant's Zzz/stalled
+  // state (never its progress -- see reconcileRequirementStates()) rather than waiting for the
+  // player's next step, so a plant that no longer matches shows Zzz right away (and one that now
+  // matches is ready to receive walking steps right away) instead of lagging behind the song change.
+  reconcileRequirementStates();
 }
 // Dedicated Stop control (Task 5/6): built directly on the existing stopRadioPlayback() (which
 // already owns clearing radioTimer/radioNoteTimer -- the tone loop and note-spawn interval), so
 // there is still only ONE thing that ever starts/stops those two timers. Mirrors cycleRadioSong()'s
 // own pattern exactly: direct DOM patches for the widget class/label/stop-button (no full render()
-// needed), then musicGrowthTick() for immediate music-requirement reconciliation -- since
+// needed), then reconcileRequirementStates() for immediate Zzz/stalled reconciliation -- since
 // AudioManager.currentPlayingTrack derives straight from state.radio.isPlaying, flipping that flag
 // here is all that's needed for it to correctly report null from this point on.
 function stopRadio(){
@@ -2150,9 +2259,8 @@ function stopRadio(){
   toast('📻 Radio stopped.');
   // Same immediate reconciliation cycleRadioSong() does on a song change -- stopping is just as
   // much a "the track changed" event (to nothing) as switching songs is, and every music-
-  // requirement plant needs to know that right away rather than waiting up to 2.5s for the next
-  // periodic musicGrowthTick().
-  musicGrowthTick();
+  // requirement plant needs its Zzz state to reflect that right away, not just on its next step.
+  reconcileRequirementStates();
 }
 
 /* ===================== WALK SESSION: Wake Lock + accelerometer step counter ===================== */
@@ -2373,8 +2481,10 @@ let playerMarkerAnimStart = 0;
 const PLAYER_MARKER_ANIM_MS = 900; // glide toward each new fix over this long instead of snapping to it
 let spawnMarkers = {};       // uid -> Leaflet marker
 let poiMarkers = [];
-let safetyZones = []; // schools/hospitals/residential exclusion buffer, fetched per map session
-let lastPOIFetchCenter = null; // where POIs/safety-zones were last fetched from
+let safetyZones = []; // schools/hospitals/residential/military/airport/railway/highway/private-access exclusion buffer, fetched per map session
+let pedestrianWayPoints = []; // sidewalks/footways/paths/pedestrian streets/plazas/park paths -- the preferred spawn candidate source, see pickSafeSpawnPoint()
+let lastPickedWayId = null;   // light clustering aid: biases consecutive picks within one spawn batch toward the same real path
+let lastPOIFetchCenter = null; // where POIs/safety-zones/pedestrian-ways were last fetched from
 let poiRefreshInFlight = false;
 let watchId = null;
 let mapGeneration = 0;       // bumped on every init/destroy so stale async work (OSM fetch) is ignored
@@ -2732,9 +2842,8 @@ function sanitizePotEntry(p){
   const progress = Number.isFinite(p.progress) ? Math.max(0, Math.min(type.threshold, p.progress)) : 0;
   const out = { uid, type: p.type, progress };
   if(type.requirement){
-    // Resume the music-growth clock fresh from "now" rather than trusting a stale/offline
-    // timestamp -- avoids a huge apparent elapsed-time jump instantly finishing the plant.
-    out.lastMusicTickAt = Date.now();
+    // Growth is purely walking-step-driven now, so there's no elapsed-time clock to resume on
+    // load -- just recompute whether the requirement happens to be met right now.
     out.stalled = !isRequirementMet(out);
   }
   return out;
@@ -2929,6 +3038,7 @@ function spawnAmbientSeed(forcedTierKey){
   if(!key) key = DEX_ORDER.find(k=> SEED_TYPES[k].category==='both'); // defensive fallback, should never trigger
   if(!key) return;
   const pt = pickGuardedSafeSpawnPoint(player, 15, AMBIENT_RADIUS_M);
+  if(!pt) return; // no verified pedestrian-accessible+safe spot found right now -- skip this spawn rather than guess; ambientMaintenance() re-evaluates the deficit fresh on its next tick
   addSpawnToState(key, pt.lat, pt.lon, 'ambient');
 }
 // Special timed seeds pull ONLY from the "Map Only" category pool — rarer tiers spawn less often.
@@ -2940,6 +3050,7 @@ function spawnSpecialSeed(){
   if(!key) key = DEX_ORDER.find(k=> SEED_TYPES[k].category==='map');
   if(!key) return;
   const pt = pickGuardedSafeSpawnPoint(player, 40, SPECIAL_RADIUS_M);
+  if(!pt) return; // no verified pedestrian-accessible+safe spot found right now -- skip this special spawn rather than guess (its own interval will simply try again next cycle)
   addSpawnToState(key, pt.lat, pt.lon, 'special');
   const type = SEED_TYPES[key];
   const label = type.rarityLabel.charAt(0) + type.rarityLabel.slice(1).toLowerCase();
@@ -2969,11 +3080,16 @@ function pickGuardedSafeSpawnPoint(center, minM, maxM){
   const cappedMax = Math.min(maxM, ABSOLUTE_MAX_SPAWN_DISTANCE_M);
   for(let attempt=0; attempt<SPAWN_REROLL_HARD_CAP; attempt++){
     const pt = pickSafeSpawnPoint(center, minM, cappedMax);
+    if(!pt) continue; // no verified accessible+safe candidate this attempt -- re-roll rather than accepting an unverified point
     if(haversineMeters(center.lat, center.lon, pt.lat, pt.lon) <= cappedMax) return pt;
   }
-  // Never realistically reached — see the note above — but if it ever were, clamp straight onto
-  // the boundary rather than either accepting an out-of-range point or spawning nothing at all.
-  return clampPointToRadius(center, pickSafeSpawnPoint(center, minM, cappedMax), cappedMax);
+  // NEVER fall back to a random/unverified coordinate here (see spec: "better to spawn fewer
+  // seeds or temporarily spawn none than to put a seed somewhere inappropriate"). If every attempt
+  // in the loop above failed to produce a verified accessible+safe point, signal "don't spawn this
+  // cycle" -- callers (spawnAmbientSeed/spawnSpecialSeed) simply skip, and the normal
+  // maintenance/respawn loop tries again on its next tick once (hopefully) more map data has
+  // loaded or the player has moved somewhere with better pedestrian coverage.
+  return null;
 }
 // Keeps 2-3 ambient (common, "both"-pool) seeds alive within a strict 500m radius at all times.
 // - A totally empty board (first load, or everything lost at once) refills its FULL target
@@ -3696,20 +3812,27 @@ function potVisualInner(potState, index){
         <ellipse cx="44" cy="84" rx="34" ry="8" fill="var(--terracotta-rim)" stroke="var(--terracotta-dark)" stroke-width="2"/>
         <ellipse cx="44" cy="84" rx="27" ry="5" fill="#5D4037"/>
         <!-- Subtle shadow tracing the dirt's own back edge, just inside the rim -- sells the
-             "recessed into the pot" depth cue without needing a separate front-dirt highlight. -->
+             "recessed into the pot" depth cue without needing a separate front-dirt highlight.
+             Deliberately the TOP half of the dirt ellipse (sweep-flag 1, see the note below on the
+             wall path for why sweep direction matters) since the "back" edge, farther from the
+             viewer, reads as the upper arc in this style of illustration. -->
         <path d="M17 84 A27 5 0 0 1 71 84" fill="none" stroke="#3a2a1c" stroke-width="1.5" opacity="0.22"/>
       </g>
       <g transform="translate(44,84)"><g ${sway}>${plantSVG(potState)}</g></g>
       <g>
-        <!-- LAYERING BUG FIX: the pot body's top edge used to be a flat straight line
-             ("M10 84 L18 126 Q44 132 70 126 L78 84 Z" -- the closing "Z" drew a solid line
-             straight across from (78,84) to (10,84)), which sliced right through the lower half
-             of the dirt/rim ellipses above (they extend down to y=89/92) since this whole shape is
-             filled and painted after them. The body's top edge is now an elliptical arc that
-             traces EXACTLY the bottom boundary of the rim ellipse it sits below (same rx=34 ry=8
-             centered at 44,84), so the wall picks up precisely where the rim's visible clay ends
-             -- zero gap, zero overlap -- instead of cutting across the middle of the dirt. -->
-        <path d="M10 84 A34 8 0 0 1 78 84 L70 126 Q44 132 18 126 Z" fill="var(--terracotta)" stroke="var(--terracotta-dark)" stroke-width="2" stroke-linejoin="round"/>
+        <!-- LAYERING BUG FIX (still visible after the first attempt -- root-caused properly this
+             time): an elliptical arc's sweep-flag controls WHICH of the two possible arcs gets
+             drawn. In SVG's y-DOWN coordinate system, sweep-flag=1 sweeps through INCREASING
+             parametric angle from the start point, which for two points on the ellipse's major
+             axis (like the rim's left/right edges here) traces the TOP half, not the bottom --
+             the previous version of this path used sweep-flag=1, so instead of fixing the original
+             flat-line bug it reintroduced the same net effect a different way: the wall's top edge
+             arced UP into the rim/dirt area, and the filled body below that arc ended up covering
+             the dirt again. sweep-flag=0 is the one that actually traces the BOTTOM of the rim
+             ellipse (same rx=34 ry=8 centered at 44,84) -- picking up precisely where the rim's
+             visible clay ends, zero gap, zero overlap, so the full dirt ellipse (and the plant
+             emerging from it) stays visible inside the opening at every growth stage. -->
+        <path d="M10 84 A34 8 0 0 0 78 84 L70 126 Q44 132 18 126 Z" fill="var(--terracotta)" stroke="var(--terracotta-dark)" stroke-width="2" stroke-linejoin="round"/>
         <path d="M18 102 Q44 106 70 102" stroke="var(--terracotta-dark)" stroke-width="1.4" fill="none" opacity="0.5"/>
         <ellipse cx="44" cy="84" rx="34" ry="8" fill="none" stroke="var(--terracotta-dark)" stroke-width="2"/>
       </g>
@@ -4187,9 +4310,11 @@ function renderPotInspectModal(){
   const type = SEED_TYPES[p.type];
   const frac = Math.min(1, p.progress/type.threshold);
   const ready = frac >= 1;
-  // BUG FIX: music-requirement seeds accumulate `progress` in fractional real-time increments
-  // (see musicGrowthTick()'s elapsedMs/1000*rate math), so the raw number can be something like
-  // 4300.6666. Every value shown here is explicitly rounded to a whole step -- never the raw float.
+  // Defensive display rounding: plant progress is now always driven by whole walking steps (see
+  // addSteps() -- music is a gate on those steps, not an independent fractional-time growth
+  // source), so this should already be a whole number, but rounding here costs nothing and
+  // guarantees a clean whole-step display no matter what. This is purely a display calculation --
+  // it never writes back to p.progress or any other state (see the read-only guarantee below).
   const shownProgress = Math.min(Math.round(p.progress), type.threshold);
   const remaining = Math.max(0, Math.round(type.threshold - p.progress));
   return `
@@ -4585,6 +4710,11 @@ function completeTear(leftHalf, rightHalf){
 // state.totalSteps or any pot's `progress`/`stalled` outside of this routine and the parallel
 // real-time music-growth routine below. Modal open/close, rendering, and every other UI pass are
 // strictly read-only with respect to these fields.
+// THE single authoritative source of plant progress -- for every pot, requirement-gated or not.
+// CRITICAL GAMEPLAY RULE: walking is the only thing that ever grows a plant. A requirement (e.g.
+// a song that must be playing) is a GATE on whether a given batch of walking steps is allowed to
+// reach a particular pot -- never an independent, time-based growth source of its own. See
+// isRequirementMet() below for the gate check itself.
 function addSteps(n){
   state.totalSteps += n; // player level progress always advances, independent of any pot's requirement state
   const activeId = activeRoomId();
@@ -4595,21 +4725,25 @@ function addSteps(n){
       if(!p) return p;
       const type = SEED_TYPES[p.type];
       if(type.requirement){
-        // Requirement-gated seeds (e.g. a song that must be playing) never grow from steps at
-        // all -- musicGrowthTick() is the only thing that ever advances their progress, gated on
-        // isRequirementMet(). Still keep this pot's .stalled flag current, so the "Zzz" overlay
-        // reflects reality immediately rather than waiting up to 2.5s for the next tick.
-        const shouldBeStalled = !isRequirementMet(p);
-        if(p.stalled !== shouldBeStalled) return {...p, stalled: shouldBeStalled};
-        return p;
+        const met = isRequirementMet(p);
+        if(!met){
+          // Requirement not currently met: this batch of walking steps contributes ZERO progress
+          // to this pot -- not partial credit, not a different growth rate, nothing. Only keep the
+          // .stalled flag current so the "Zzz" overlay reflects reality immediately.
+          if(!p.stalled) return {...p, stalled: true};
+          return p;
+        }
+        // Requirement IS met: this pot receives the SAME walking steps as any ordinary plant --
+        // there is no separate music-driven rate or timer here, just the ordinary step math below.
       }
       const newProgress = Math.min(type.threshold, p.progress + n);
-      if(newProgress > p.progress){
+      const stalledChanged = type.requirement && p.stalled; // was stalled, now unstalling because the gate is open and steps are flowing
+      if(newProgress > p.progress || stalledChanged){
         const update = {index:i, from:p.progress, to:newProgress, threshold:type.threshold};
         allReadyEvents.push(update);
         if(room.id === activeId) growthUpdates.push(update);
       }
-      return {...p, progress:newProgress};
+      return {...p, progress:newProgress, stalled: type.requirement ? false : p.stalled};
     });
   });
   const leveled = checkLevelUp();
@@ -4625,38 +4759,36 @@ function addSteps(n){
   return { growthUpdates: allReadyEvents, leveled };
 }
 
-// Growth loop for music-requirement seeds: uses real timestamp differences (Date.now(), not a
-// frame/tick counter) so elapsed time is computed correctly even if the tab was throttled or
-// backgrounded between ticks, and so a persisted/reloaded pot's stalled status and progress would
-// still evaluate accurately from wherever its lastMusicTickAt was left off.
-const MUSIC_GROWTH_FULL_SECONDS = 90; // continuous correct-song playback time to fully grow one
-function musicGrowthTick(){
-  const now = Date.now();
+// Pure, read-mostly reconciliation: keeps every requirement-gated pot's .stalled flag (and the
+// "Zzz" overlay it drives) in sync with the CURRENT requirement state. This is the ONLY thing that
+// still runs off radio/planting events rather than a walking step -- and, critically, it NEVER
+// touches p.progress. It exists purely so the Zzz appears/disappears the instant the radio changes
+// or a requirement-gated seed is planted, rather than waiting for the player's next step. Actual
+// growth only ever happens inside addSteps() above, driven by real walking steps.
+//
+// (This replaces the previous musicGrowthTick(), which used to run on its own 2.5s Date.now()-based
+// timer and grow requirement plants purely from elapsed real time while the right song played --
+// that was the exact bug this update fixes: music was acting as an independent growth clock
+// instead of a gate on walking steps. There is no longer any periodic timer calling this function;
+// it only runs in direct response to the specific events listed above, and there is no code path
+// anywhere that can increase a pot's progress without a corresponding addSteps() call.)
+function reconcileRequirementStates(){
   const activeId = activeRoomId();
   let visualsChanged = false;
   ROOMS.forEach(room=>{
-    state.roomPots[room.id].forEach((p, i)=>{
+    state.roomPots[room.id].forEach(p=>{
       if(!p) return;
       const type = SEED_TYPES[p.type];
-      if(!type.requirement || type.requirement.type !== 'song') return;
-      if(!p.lastMusicTickAt) p.lastMusicTickAt = now;
-      const elapsedMs = now - p.lastMusicTickAt;
-      p.lastMusicTickAt = now;
-      if(p.progress >= type.threshold) return; // fully grown already
-      const met = isRequirementMet(p);
-      if(!met){
-        if(!p.stalled){ p.stalled = true; if(room.id === activeId) visualsChanged = true; }
-        return; // growth paused entirely while the requirement isn't met
+      if(!type.requirement) return;
+      const shouldBeStalled = !isRequirementMet(p);
+      if(p.stalled !== shouldBeStalled){
+        p.stalled = shouldBeStalled;
+        if(room.id === activeId) visualsChanged = true;
       }
-      if(p.stalled){ p.stalled = false; visualsChanged = true; }
-      const rate = type.threshold / MUSIC_GROWTH_FULL_SECONDS; // progress units per second
-      const from = p.progress;
-      p.progress = Math.min(type.threshold, p.progress + (elapsedMs/1000) * rate);
-      if(room.id === activeId && p.progress > from){ animatePotGrowth(i, from, p.progress); visualsChanged = true; }
     });
   });
   if(visualsChanged && state.tab === 'garden' && !state.modal) render();
-  if(visualsChanged) saveGameStateDebounced(); // progress/stalled state changed even if not currently rendered
+  if(visualsChanged) saveGameStateDebounced();
 }
 function simulateSteps(){
   const { growthUpdates, leveled } = addSteps(500);
@@ -4707,10 +4839,11 @@ function plantSeed(uid){
   }
   state.activePotId = null;
   state.modal = null;
-  // Music-requirement seeds track real elapsed time (not steps) since planting -- see
-  // musicGrowthTick() -- so the clock starts the moment it goes in the soil.
+  // Requirement-gated seeds need their initial .stalled state set the instant they're planted --
+  // Zzz must be immediately visible if the requirement isn't met right now, rather than waiting
+  // for the player's next step. No elapsed-time tracking is needed here anymore: growth is purely
+  // walking-step-driven (see addSteps()), so there's no "clock" to start.
   if(SEED_TYPES[pots[idx].type].requirement){
-    pots[idx].lastMusicTickAt = Date.now();
     pots[idx].stalled = !isRequirementMet(pots[idx]);
   }
   playSfx('plant');
@@ -4979,7 +5112,14 @@ loadGameStatePersistence(); // pouch, room/pot contents & growth, Dex, discovere
 refreshLiveWeather(); // fire-and-forget: tries real-world weather immediately; falls back to the demo cycle below until/unless it succeeds
 setInterval(cycleWeather, 14000);
 setInterval(refreshWeatherIfStale, 15*60*1000); // periodic check -- only actually fetches if the staleness/location criteria in isWeatherStale() are met
-setInterval(musicGrowthTick, 2500);
+// NOTE: there is deliberately NO periodic timer driving plant growth or reconcileRequirementStates()
+// here. Growth is 100% walking-step-driven (see addSteps()), and the only thing that can ever
+// change whether a requirement is currently met is an explicit radio action (cycleRadioSong(),
+// stopRadio()) or planting a seed (plantSeed()) -- each of those already calls
+// reconcileRequirementStates() / sets the correct initial .stalled state directly, synchronously,
+// the instant it happens. A periodic re-check would be pure redundancy (nothing else can change
+// isRequirementMet()'s answer between those events) and was exactly the kind of extra timer this
+// update explicitly removes.
 setInterval(windowsillTimeTick, 60000); // real-clock phase check; only visually crossfades when the phase actually changes
 mapWorldTimer = setInterval(mapWorldTick, MAP_TICK_MS);
 // Reconcile against Date.now() whenever the app regains focus/visibility — handles the device
