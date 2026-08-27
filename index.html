@@ -2498,6 +2498,55 @@ const GEO_UPDATE_MIN_INTERVAL_MS = 3000; // throttle heavier map work (recenter/
 let lastAcceptedFixTs = 0;
 const GEO_MAX_ACCURACY_M = 35;
 const GEO_STALE_FIX_MS = 12000;
+// MOVEMENT VALIDATION (layered on top of the accuracy filter above, upstream of state.mapLocation):
+// clearing the accuracy check is NOT the same as "the player moved" -- GPS coordinates naturally
+// drift by several meters even while someone stands perfectly still, and that drift alone was
+// previously enough to move the player marker and shift seed proximity. `isGenuineMovement()`
+// compares each accuracy-passed fix against the last VALIDATED position (lastValidatedFix, not the
+// raw fix itself) using both fixes' reported accuracy, combined via root-sum-square -- the
+// standard way to combine two independent position uncertainties into one "noise radius" -- to
+// decide whether the apparent displacement plausibly exceeds GPS noise. A fix that fails this
+// check never reaches state.mapLocation: the marker doesn't move, seed distances don't change, the
+// map doesn't recenter. See the two call sites below (the watchPosition callback) for where this
+// gates the write to state.mapLocation.
+let lastValidatedFix = null; // {lat, lon, accuracy, ts} -- the fix currently reflected in state.mapLocation
+let recentRawFixes = [];     // small rolling window of recent accuracy-passed fixes -- used ONLY to
+                              // notice a slow-but-consistent walking trend that no single fix is
+                              // large enough to clear the immediate noise threshold on its own
+const RECENT_FIX_WINDOW = 5;
+const RECENT_FIX_MAX_AGE_MS = 15000;   // fixes older than this age out of the trend window
+const TREND_MIN_NET_METERS = 6;        // minimum net displacement across the window before even considering it a trend
+const TREND_DIRECTNESS_RATIO = 0.6;    // net displacement must be at least this fraction of total path length -- rejects back-and-forth bouncing in place
+const GEO_FORCE_RECONCILE_MS = 45000;  // never let the validated position go stale forever -- see the note inside isGenuineMovement()
+function isGenuineMovement(newFix){
+  if(!lastValidatedFix) return true; // first fix this session -- nothing to compare against yet, always accept
+  const movedM = haversineMeters(lastValidatedFix.lat, lastValidatedFix.lon, newFix.lat, newFix.lon);
+  const accA = lastValidatedFix.accuracy || GEO_MAX_ACCURACY_M;
+  const accB = newFix.accuracy || GEO_MAX_ACCURACY_M;
+  const noiseRadius = Math.sqrt(accA*accA + accB*accB); // combined uncertainty of the two fixes being compared -- a tighter-accuracy fix is trusted more, per spec
+  if(movedM > noiseRadius) return true; // displacement clearly exceeds what GPS noise alone could plausibly produce -- genuine movement
+  // Not enough on its own -- check whether a short recent run of smaller fixes adds up to
+  // consistent, directional movement (e.g. a slow walk where each individual GPS tick is small).
+  // "Directness" (net displacement / total path length) is what distinguishes a real, if winding,
+  // walk from bouncing back and forth within the accuracy circle while stationary -- pure jitter
+  // has a low ratio (steps partially cancel out), consistent movement stays close to 1.
+  if(recentRawFixes.length >= 3){
+    const first = recentRawFixes[0];
+    const netM = haversineMeters(first.lat, first.lon, newFix.lat, newFix.lon);
+    let pathM = 0;
+    for(let i=1;i<recentRawFixes.length;i++) pathM += haversineMeters(recentRawFixes[i-1].lat, recentRawFixes[i-1].lon, recentRawFixes[i].lat, recentRawFixes[i].lon);
+    pathM += haversineMeters(recentRawFixes[recentRawFixes.length-1].lat, recentRawFixes[recentRawFixes.length-1].lon, newFix.lat, newFix.lon);
+    if(netM >= TREND_MIN_NET_METERS && pathM > 0 && (netM/pathM) >= TREND_DIRECTNESS_RATIO) return true;
+  }
+  // Never stall forever (spec: "eventually reconcile to a trustworthy location"): if the validated
+  // position hasn't moved in a long time despite fixes continuing to arrive, trust the latest
+  // accuracy-passed fix even though the stricter movement test above couldn't confirm it -- e.g.
+  // very slow/meandering movement the directness check keeps being unsure about. Still gated
+  // behind the existing accuracy filter upstream, so this can never accept a genuinely poor fix,
+  // only one that already cleared GEO_MAX_ACCURACY_M.
+  if(Date.now() - lastValidatedFix.ts > GEO_FORCE_RECONCILE_MS) return true;
+  return false;
+}
 let mapWorldTimer = null;    // world-tick interval handle (expiration / respawn / special spawns)
 let mapStateLoaded = false;  // guards against ticking before persisted state has loaded
 let inRangeSpawnUid = null;  // uid of the spawn currently within COLLECT_RADIUS_M, if any
@@ -2540,7 +2589,22 @@ function requestLocation(){
         if(accuracy !== null && accuracy > GEO_MAX_ACCURACY_M && (nowTs - lastAcceptedFixTs) < GEO_STALE_FIX_MS){
           return; // low-quality fix and we still have a recent good one — ignore it entirely rather than let it jerk the player position around
         }
+        const rawFix = { lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy, ts: nowTs };
+        // Feed the trend window regardless of whether THIS fix individually passes movement
+        // validation below -- a slow, genuine walk is made of many small ticks, each too small to
+        // clear the immediate noise threshold alone, and the trend detector inside
+        // isGenuineMovement() needs to see all of them to notice the cumulative pattern.
+        recentRawFixes.push(rawFix);
+        recentRawFixes = recentRawFixes.filter(f=> nowTs - f.ts <= RECENT_FIX_MAX_AGE_MS).slice(-RECENT_FIX_WINDOW);
+        if(!isGenuineMovement(rawFix)){
+          // GPS noise, not real movement: state.mapLocation, the player marker, seed proximity,
+          // and the radar are all left completely untouched -- this is the fix for the "player
+          // marker/seed distance drifts while standing still" regression. Critically, this does
+          // NOT move the map, recenter the camera, or touch any downstream gameplay state.
+          return;
+        }
         lastAcceptedFixTs = nowTs;
+        lastValidatedFix = rawFix;
         const hadRealFixBefore = state.mapLocation.status === 'granted';
         state.mapLocation = {status:'granted', lat:pos.coords.latitude, lon:pos.coords.longitude};
         // If the map tab is showing the blank permission screen (no Leaflet instance mounted
